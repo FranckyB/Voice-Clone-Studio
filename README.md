@@ -1,6 +1,6 @@
 # Voice Clone Studio
 
-A modular Gradio-based web UI for voice cloning, voice design, and multi-speaker conversation, powered by [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) and [VibeVoice](https://github.com/microsoft/VibeVoice).
+A modular Gradio-based web UI for voice cloning, voice design, and multi-speaker conversation, powered by [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS), [VibeVoice](https://github.com/microsoft/VibeVoice), and [LuxTTS](https://github.com/ysharma3501/LuxTTS).
 Supports both Whisper and VibeVoice ASR for automatic transcription.
 
 ![Voice Clone Studio](https://img.shields.io/badge/Voice%20Clone%20Studio-v1.0-blue) ![Qwen3-TTS](https://img.shields.io/badge/Qwen3--TTS-Powered-blue) ![VibeVoice](https://img.shields.io/badge/VibeVoice-TTS-green) ![VibeVoice](https://img.shields.io/badge/VibeVoice-ASR-green)
@@ -14,7 +14,7 @@ Voice Clone Studio v1.0 is fully modular. The main file (`voice_clone_studio.py`
 ### Voice Clone
 Clone voices from your own audio samples. Provide a short reference audio clip with its transcript, and generate new speech in that voice.
 
-- **Multiple engines** - Qwen3-TTS (0.6B/1.7B) or VibeVoice (1.5B/Large/Large-4bit)
+- **Multiple engines** - Qwen3-TTS (0.6B/1.7B), VibeVoice (1.5B/Large/Large-4bit), or LuxTTS (Default)
 - **Voice prompt caching** - First generation processes the sample, subsequent ones are instant
 - **Seed control** - Reproducible results with saved seeds
 - **Emotion presets** - 40+ emotion presets with adjustable intensity

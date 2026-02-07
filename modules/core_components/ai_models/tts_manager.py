@@ -11,8 +11,12 @@ from typing import Dict, Tuple, Optional
 from qwen_tts import Qwen3TTSModel
 
 from .model_utils import (
-    get_device, get_dtype, get_attention_implementation,
-    check_model_available_locally, empty_cuda_cache, log_gpu_memory
+    get_device,
+    get_dtype,
+    get_attention_implementation,
+    check_model_available_locally,
+    empty_cuda_cache,
+    log_gpu_memory,
 )
 
 
@@ -38,15 +42,37 @@ class TTSManager:
         self._qwen3_custom_voice_size = None
         self._vibevoice_tts_model = None
         self._vibevoice_tts_size = None
+        self._luxtts_model = None
+        self._luxtts_device = None
+        self._luxtts_threads = None
 
         # Prompt cache
         self._voice_prompt_cache = {}
+        self._luxtts_prompt_cache = {}
         self._last_loaded_model = None
+
+    def _get_luxtts_class(self):
+        """Import LuxTTS with a fallback module path."""
+        try:
+            from zipvoice.luxtts import LuxTTS
+
+            return LuxTTS
+        except ImportError:
+            try:
+                from zipvoice.luxvoice import LuxTTS
+
+                return LuxTTS
+            except ImportError as exc:
+                raise ImportError(
+                    "LuxTTS is not installed. Install it from the LuxTTS repository and retry."
+                ) from exc
 
     def _check_and_unload_if_different(self, model_id: str):
         """If switching to a different model, unload all."""
         if self._last_loaded_model is not None and self._last_loaded_model != model_id:
-            print(f"📦 Switching from {self._last_loaded_model} to {model_id} - unloading all TTS models...")
+            print(
+                f"📦 Switching from {self._last_loaded_model} to {model_id} - unloading all TTS models..."
+            )
             self.unload_all()
         self._last_loaded_model = model_id
 
@@ -83,7 +109,7 @@ class TTSManager:
                     model_to_load,
                     attn_implementation=attn,
                     trust_remote_code=True,
-                    **kwargs
+                    **kwargs,
                 )
                 print(f"✓ Model loaded with {attn}")
                 return model, attn
@@ -118,7 +144,7 @@ class TTSManager:
                 model_name,
                 device_map="cuda:0",
                 dtype=torch.bfloat16,
-                low_cpu_mem_usage=self.user_config.get("low_cpu_mem_usage", False)
+                low_cpu_mem_usage=self.user_config.get("low_cpu_mem_usage", False),
             )
             self._qwen3_base_size = size
             print(f"Qwen3 Base TTS ({size}) loaded!")
@@ -137,7 +163,7 @@ class TTSManager:
                 "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
                 device_map="cuda:0",
                 dtype=torch.bfloat16,
-                low_cpu_mem_usage=self.user_config.get("low_cpu_mem_usage", False)
+                low_cpu_mem_usage=self.user_config.get("low_cpu_mem_usage", False),
             )
             print("VoiceDesign model loaded!")
 
@@ -157,7 +183,7 @@ class TTSManager:
                 model_name,
                 device_map="cuda:0",
                 dtype=torch.bfloat16,
-                low_cpu_mem_usage=self.user_config.get("low_cpu_mem_usage", False)
+                low_cpu_mem_usage=self.user_config.get("low_cpu_mem_usage", False),
             )
             self._qwen3_custom_voice_size = size
             print(f"CustomVoice model ({size}) loaded!")
@@ -173,7 +199,7 @@ class TTSManager:
             print(f"Loading VibeVoice TTS ({size})...")
             try:
                 from modules.vibevoice_tts.modular.modeling_vibevoice_inference import (
-                    VibeVoiceForConditionalGenerationInference
+                    VibeVoiceForConditionalGenerationInference,
                 )
                 import warnings
 
@@ -190,7 +216,10 @@ class TTSManager:
                     model_path = f"FranckyB/VibeVoice-{size}"
 
                 import logging
-                logging.getLogger("transformers.tokenization_utils_base").setLevel(logging.ERROR)
+
+                logging.getLogger("transformers.tokenization_utils_base").setLevel(
+                    logging.ERROR
+                )
 
                 with warnings.catch_warnings():
                     warnings.filterwarnings("ignore", category=UserWarning)
@@ -200,7 +229,9 @@ class TTSManager:
                         model_path,
                         dtype=torch.bfloat16,
                         device_map="cuda:0" if torch.cuda.is_available() else "cpu",
-                        low_cpu_mem_usage=self.user_config.get("low_cpu_mem_usage", False)
+                        low_cpu_mem_usage=self.user_config.get(
+                            "low_cpu_mem_usage", False
+                        ),
                     )
 
                 self._vibevoice_tts_size = size
@@ -214,6 +245,37 @@ class TTSManager:
                 raise
 
         return self._vibevoice_tts_model
+
+    def get_luxtts(self, device="auto", threads=2):
+        """Load LuxTTS model."""
+        if device == "auto":
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+
+        model_id = f"luxtts_{device}"
+        self._check_and_unload_if_different(model_id)
+
+        threads = int(threads) if threads is not None else 0
+
+        needs_reload = (
+            self._luxtts_model is None
+            or self._luxtts_device != device
+            or (device == "cpu" and self._luxtts_threads != threads)
+        )
+
+        if needs_reload:
+            LuxTTS = self._get_luxtts_class()
+            if self._luxtts_model is not None:
+                del self._luxtts_model
+                self._luxtts_model = None
+            kwargs = {"device": device}
+            if device == "cpu" and threads > 0:
+                kwargs["threads"] = threads
+
+            self._luxtts_model = LuxTTS("YatharthS/LuxTTS", **kwargs)
+            self._luxtts_device = device
+            self._luxtts_threads = threads if device == "cpu" else None
+
+        return self._luxtts_model, device
 
     def unload_all(self):
         """Unload all TTS models to free VRAM."""
@@ -239,6 +301,15 @@ class TTSManager:
             self._vibevoice_tts_model = None
             freed.append("VibeVoice TTS")
 
+        if self._luxtts_model is not None:
+            del self._luxtts_model
+            self._luxtts_model = None
+            self._luxtts_device = None
+            self._luxtts_threads = None
+            freed.append("LuxTTS")
+
+        self._luxtts_prompt_cache.clear()
+
         if freed:
             empty_cuda_cache()
             print(f"🗑️ Unloaded TTS models: {', '.join(freed)}")
@@ -249,10 +320,19 @@ class TTSManager:
     # GENERATION METHODS
     # ============================================================
 
-    def generate_voice_design(self, text: str, language: str, instruct: str, seed: int = -1,
-                              do_sample: bool = True, temperature: float = 0.9, top_k: int = 50,
-                              top_p: float = 1.0, repetition_penalty: float = 1.05,
-                              max_new_tokens: int = 2048) -> Tuple[str, int]:
+    def generate_voice_design(
+        self,
+        text: str,
+        language: str,
+        instruct: str,
+        seed: int = -1,
+        do_sample: bool = True,
+        temperature: float = 0.9,
+        top_k: int = 50,
+        top_p: float = 1.0,
+        repetition_penalty: float = 1.05,
+        max_new_tokens: int = 2048,
+    ) -> Tuple[str, int]:
         """
         Generate audio using voice design with natural language instructions.
 
@@ -294,7 +374,7 @@ class TTSManager:
             top_k=top_k,
             top_p=top_p,
             repetition_penalty=repetition_penalty,
-            max_new_tokens=max_new_tokens
+            max_new_tokens=max_new_tokens,
         )
 
         # Convert to numpy if needed
@@ -306,11 +386,21 @@ class TTSManager:
 
         return audio_data, sr
 
-    def generate_custom_voice(self, text: str, language: str, speaker: str, instruct: str = None,
-                              model_size: str = "1.7B", seed: int = -1,
-                              do_sample: bool = True, temperature: float = 0.9, top_k: int = 50,
-                              top_p: float = 1.0, repetition_penalty: float = 1.05,
-                              max_new_tokens: int = 2048) -> Tuple[str, int]:
+    def generate_custom_voice(
+        self,
+        text: str,
+        language: str,
+        speaker: str,
+        instruct: str = None,
+        model_size: str = "1.7B",
+        seed: int = -1,
+        do_sample: bool = True,
+        temperature: float = 0.9,
+        top_k: int = 50,
+        top_p: float = 1.0,
+        repetition_penalty: float = 1.05,
+        max_new_tokens: int = 2048,
+    ) -> Tuple[str, int]:
         """
         Generate audio using CustomVoice model with premium speakers.
 
@@ -354,7 +444,7 @@ class TTSManager:
             "top_k": top_k,
             "top_p": top_p,
             "repetition_penalty": repetition_penalty,
-            "max_new_tokens": max_new_tokens
+            "max_new_tokens": max_new_tokens,
         }
         if instruct and instruct.strip():
             kwargs["instruct"] = instruct.strip()
@@ -370,11 +460,22 @@ class TTSManager:
 
         return audio_data, sr
 
-    def generate_with_trained_model(self, text: str, language: str, speaker_name: str,
-                                    checkpoint_path: str, instruct: str = None, seed: int = -1,
-                                    do_sample: bool = True, temperature: float = 0.9, top_k: int = 50,
-                                    top_p: float = 1.0, repetition_penalty: float = 1.05,
-                                    max_new_tokens: int = 2048, user_config: dict = None) -> Tuple[str, int]:
+    def generate_with_trained_model(
+        self,
+        text: str,
+        language: str,
+        speaker_name: str,
+        checkpoint_path: str,
+        instruct: str = None,
+        seed: int = -1,
+        do_sample: bool = True,
+        temperature: float = 0.9,
+        top_k: int = 50,
+        top_p: float = 1.0,
+        repetition_penalty: float = 1.05,
+        max_new_tokens: int = 2048,
+        user_config: dict = None,
+    ) -> Tuple[str, int]:
         """
         Generate audio using a trained custom voice model checkpoint.
 
@@ -422,7 +523,7 @@ class TTSManager:
             checkpoint_path,
             device_map="cuda:0" if torch.cuda.is_available() else "cpu",
             torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
-            low_cpu_mem_usage=user_config.get("low_cpu_mem_usage", False)
+            low_cpu_mem_usage=user_config.get("low_cpu_mem_usage", False),
         )
 
         # Build kwargs
@@ -435,7 +536,7 @@ class TTSManager:
             "top_k": top_k,
             "top_p": top_p,
             "repetition_penalty": repetition_penalty,
-            "max_new_tokens": max_new_tokens
+            "max_new_tokens": max_new_tokens,
         }
         if instruct and instruct.strip():
             kwargs["instruct"] = instruct.strip()
@@ -451,10 +552,20 @@ class TTSManager:
 
         return audio_data, sr
 
-    def generate_voice_clone_qwen(self, text: str, language: str, prompt_items, seed: int = -1,
-                                  do_sample: bool = True, temperature: float = 0.9, top_k: int = 50,
-                                  top_p: float = 1.0, repetition_penalty: float = 1.05,
-                                  max_new_tokens: int = 2048, model_size: str = "1.7B") -> Tuple[str, int]:
+    def generate_voice_clone_qwen(
+        self,
+        text: str,
+        language: str,
+        prompt_items,
+        seed: int = -1,
+        do_sample: bool = True,
+        temperature: float = 0.9,
+        top_k: int = 50,
+        top_p: float = 1.0,
+        repetition_penalty: float = 1.05,
+        max_new_tokens: int = 2048,
+        model_size: str = "1.7B",
+    ) -> Tuple[str, int]:
         """
         Generate audio using Qwen3 voice cloning with cached prompt.
 
@@ -489,24 +600,24 @@ class TTSManager:
 
         # Prepare generation kwargs
         gen_kwargs = {
-            'max_new_tokens': int(max_new_tokens),
+            "max_new_tokens": int(max_new_tokens),
         }
         if do_sample:
-            gen_kwargs['do_sample'] = True
-            gen_kwargs['temperature'] = temperature
+            gen_kwargs["do_sample"] = True
+            gen_kwargs["temperature"] = temperature
             if top_k > 0:
-                gen_kwargs['top_k'] = int(top_k)
+                gen_kwargs["top_k"] = int(top_k)
             if top_p < 1.0:
-                gen_kwargs['top_p'] = top_p
+                gen_kwargs["top_p"] = top_p
             if repetition_penalty != 1.0:
-                gen_kwargs['repetition_penalty'] = repetition_penalty
+                gen_kwargs["repetition_penalty"] = repetition_penalty
 
         # Generate using the cached prompt
         wavs, sr = model.generate_voice_clone(
             text=text.strip(),
             language=language if language != "Auto" else "Auto",
             voice_clone_prompt=prompt_items,
-            **gen_kwargs
+            **gen_kwargs,
         )
 
         # Convert to numpy if needed
@@ -518,11 +629,21 @@ class TTSManager:
 
         return audio_data, sr
 
-    def generate_voice_clone_vibevoice(self, text: str, voice_sample_path: str, seed: int = -1,
-                                       do_sample: bool = False, temperature: float = 1.0, top_k: int = 50,
-                                       top_p: float = 1.0, repetition_penalty: float = 1.0,
-                                       cfg_scale: float = 3.0, num_steps: int = 20,
-                                       model_size: str = "Large", user_config: dict = None) -> Tuple[str, int]:
+    def generate_voice_clone_vibevoice(
+        self,
+        text: str,
+        voice_sample_path: str,
+        seed: int = -1,
+        do_sample: bool = False,
+        temperature: float = 1.0,
+        top_k: int = 50,
+        top_p: float = 1.0,
+        repetition_penalty: float = 1.0,
+        cfg_scale: float = 3.0,
+        num_steps: int = 20,
+        model_size: str = "Large",
+        user_config: dict = None,
+    ) -> Tuple[str, int]:
         """
         Generate audio using VibeVoice voice cloning.
 
@@ -558,7 +679,9 @@ class TTSManager:
         # Load model
         model = self.get_vibevoice_tts(model_size)
 
-        from modules.vibevoice_tts.processor.vibevoice_processor import VibeVoiceProcessor
+        from modules.vibevoice_tts.processor.vibevoice_processor import (
+            VibeVoiceProcessor,
+        )
 
         # Map model_size to valid HuggingFace repo path
         if model_size == "Large (4-bit)":
@@ -568,14 +691,18 @@ class TTSManager:
 
         # Suppress tokenizer mismatch warning
         prev_level = logging.getLogger("transformers.tokenization_utils_base").level
-        logging.getLogger("transformers.tokenization_utils_base").setLevel(logging.ERROR)
+        logging.getLogger("transformers.tokenization_utils_base").setLevel(
+            logging.ERROR
+        )
 
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=UserWarning)
             if user_config is None:
                 user_config = {}
             offline_mode = user_config.get("offline_mode", False)
-            processor = VibeVoiceProcessor.from_pretrained(model_path, local_files_only=offline_mode)
+            processor = VibeVoiceProcessor.from_pretrained(
+                model_path, local_files_only=offline_mode
+            )
 
         logging.getLogger("transformers.tokenization_utils_base").setLevel(prev_level)
 
@@ -601,15 +728,15 @@ class TTSManager:
         model.set_ddpm_inference_steps(num_steps=int(num_steps))
 
         # Prepare generation config
-        gen_config = {'do_sample': do_sample}
+        gen_config = {"do_sample": do_sample}
         if do_sample:
-            gen_config['temperature'] = temperature
+            gen_config["temperature"] = temperature
             if top_k > 0:
-                gen_config['top_k'] = int(top_k)
+                gen_config["top_k"] = int(top_k)
             if top_p < 1.0:
-                gen_config['top_p'] = top_p
+                gen_config["top_p"] = top_p
             if repetition_penalty != 1.0:
-                gen_config['repetition_penalty'] = repetition_penalty
+                gen_config["repetition_penalty"] = repetition_penalty
 
         # Generate
         outputs = model.generate(
@@ -631,6 +758,144 @@ class TTSManager:
 
         return audio_data, sr
 
+    def get_luxtts_prompt_cache_path(self, sample_name, param_hash):
+        """Get path to cached LuxTTS prompt."""
+        return self.samples_dir / f"{sample_name}_luxtts_{param_hash}.prompt"
+
+    def _compute_luxtts_audio_hash(self, wav_path):
+        """Compute hash of sample audio bytes."""
+        hasher = hashlib.md5()
+        with open(wav_path, "rb") as f:
+            hasher.update(f.read())
+        return hasher.hexdigest()
+
+    def _compute_luxtts_param_hash(self, audio_hash, rms, ref_duration):
+        """Compute hash of LuxTTS prompt parameters."""
+        hasher = hashlib.md5()
+        hasher.update(audio_hash.encode("utf-8"))
+        hasher.update(str(rms).encode("utf-8"))
+        hasher.update(str(ref_duration).encode("utf-8"))
+        return hasher.hexdigest()
+
+    def _load_luxtts_prompt_cache(self, sample_name, param_hash, device):
+        """Load LuxTTS encoded prompt from cache if available."""
+        cache_key = f"{sample_name}_{param_hash}"
+
+        if cache_key in self._luxtts_prompt_cache:
+            return self._luxtts_prompt_cache[cache_key]
+
+        cache_path = self.get_luxtts_prompt_cache_path(sample_name, param_hash)
+        if not cache_path.exists():
+            return None
+
+        try:
+            cache_data = torch.load(cache_path, map_location="cpu", weights_only=False)
+            cached_prompt = cache_data.get("prompt")
+            if isinstance(cached_prompt, torch.Tensor):
+                if device == "cuda" and torch.cuda.is_available():
+                    cached_prompt = cached_prompt.to("cuda")
+            self._luxtts_prompt_cache[cache_key] = cached_prompt
+            return cached_prompt
+        except Exception as e:
+            print(f"Failed to load LuxTTS prompt cache: {e}")
+            return None
+
+    def _save_luxtts_prompt_cache(
+        self, sample_name, param_hash, audio_hash, rms, ref_duration, prompt_items
+    ):
+        """Save LuxTTS encoded prompt to cache."""
+        cache_path = self.get_luxtts_prompt_cache_path(sample_name, param_hash)
+        try:
+            if isinstance(prompt_items, torch.Tensor):
+                prompt_to_save = prompt_items.cpu()
+            else:
+                prompt_to_save = prompt_items
+
+            cache_data = {
+                "prompt": prompt_to_save,
+                "audio_hash": audio_hash,
+                "params": {"rms": rms, "ref_duration": ref_duration},
+                "version": "1.0",
+            }
+            torch.save(cache_data, cache_path)
+            return True
+        except Exception as e:
+            print(f"Failed to save LuxTTS prompt cache: {e}")
+            return False
+
+    def clear_prompt_cache_for_sample(self, sample_name):
+        """Clear in-memory prompt cache for a sample."""
+        qwen_keys = [
+            k
+            for k in self._voice_prompt_cache.keys()
+            if k.startswith(f"{sample_name}_")
+        ]
+        for key in qwen_keys:
+            del self._voice_prompt_cache[key]
+
+        lux_keys = [
+            k
+            for k in self._luxtts_prompt_cache.keys()
+            if k.startswith(f"{sample_name}_")
+        ]
+        for key in lux_keys:
+            del self._luxtts_prompt_cache[key]
+
+    def generate_voice_clone_luxtts(
+        self,
+        text,
+        sample_name,
+        voice_sample_path,
+        num_steps=4,
+        t_shift=0.9,
+        speed=1.0,
+        return_smooth=False,
+        rms=0.01,
+        ref_duration=5.0,
+        device="auto",
+        threads=2,
+        progress_callback=None,
+    ):
+        """Generate audio using LuxTTS voice cloning with cached prompt."""
+        model, resolved_device = self.get_luxtts(device=device, threads=threads)
+
+        audio_hash = self._compute_luxtts_audio_hash(voice_sample_path)
+        param_hash = self._compute_luxtts_param_hash(audio_hash, rms, ref_duration)
+
+        encoded_prompt = self._load_luxtts_prompt_cache(
+            sample_name, param_hash, resolved_device
+        )
+        was_cached = encoded_prompt is not None
+
+        if not was_cached:
+            if progress_callback:
+                progress_callback(0.25, desc="Encoding LuxTTS prompt...")
+            encoded_prompt = model.encode_prompt(
+                voice_sample_path, duration=ref_duration, rms=rms
+            )
+            self._save_luxtts_prompt_cache(
+                sample_name, param_hash, audio_hash, rms, ref_duration, encoded_prompt
+            )
+
+        if progress_callback:
+            progress_callback(0.6, desc="Generating LuxTTS audio...")
+
+        final_wav = model.generate_speech(
+            text.strip(),
+            encoded_prompt,
+            num_steps=int(num_steps),
+            t_shift=float(t_shift),
+            speed=float(speed),
+            return_smooth=bool(return_smooth),
+        )
+
+        if hasattr(final_wav, "numpy"):
+            final_wav = final_wav.numpy()
+        if hasattr(final_wav, "squeeze"):
+            final_wav = final_wav.squeeze()
+
+        return final_wav, 48000, was_cached
+
     # Voice prompt caching
     def get_prompt_cache_path(self, sample_name: str, model_size: str = "1.7B") -> Path:
         """Get path to cached voice prompt."""
@@ -639,12 +904,14 @@ class TTSManager:
     def compute_sample_hash(self, wav_path: str, ref_text: str) -> str:
         """Compute hash of sample to detect changes."""
         hasher = hashlib.md5()
-        with open(wav_path, 'rb') as f:
+        with open(wav_path, "rb") as f:
             hasher.update(f.read())
-        hasher.update(ref_text.encode('utf-8'))
+        hasher.update(ref_text.encode("utf-8"))
         return hasher.hexdigest()
 
-    def save_voice_prompt(self, sample_name: str, prompt_items, sample_hash: str, model_size: str = "1.7B") -> bool:
+    def save_voice_prompt(
+        self, sample_name: str, prompt_items, sample_hash: str, model_size: str = "1.7B"
+    ) -> bool:
         """Save voice prompt to cache."""
         cache_path = self.get_prompt_cache_path(sample_name, model_size)
         try:
@@ -660,13 +927,13 @@ class TTSManager:
                     for item in prompt_items
                 ]
             else:
-                cpu_prompt = prompt_items.cpu() if isinstance(prompt_items, torch.Tensor) else prompt_items
+                cpu_prompt = (
+                    prompt_items.cpu()
+                    if isinstance(prompt_items, torch.Tensor)
+                    else prompt_items
+                )
 
-            cache_data = {
-                'prompt': cpu_prompt,
-                'hash': sample_hash,
-                'version': '1.0'
-            }
+            cache_data = {"prompt": cpu_prompt, "hash": sample_hash, "version": "1.0"}
             torch.save(cache_data, cache_path)
             print(f"Saved voice prompt: {cache_path}")
             return True
@@ -674,16 +941,18 @@ class TTSManager:
             print(f"Failed to save voice prompt: {e}")
             return False
 
-    def load_voice_prompt(self, sample_name: str, expected_hash: str, model_size: str = "1.7B") -> Optional[dict]:
+    def load_voice_prompt(
+        self, sample_name: str, expected_hash: str, model_size: str = "1.7B"
+    ) -> Optional[dict]:
         """Load voice prompt from cache if valid."""
         cache_key = f"{sample_name}_{model_size}"
 
         # Check memory cache first
         if cache_key in self._voice_prompt_cache:
             cached = self._voice_prompt_cache[cache_key]
-            if cached['hash'] == expected_hash:
+            if cached["hash"] == expected_hash:
                 print(f"Using cached prompt: {sample_name}")
-                return cached['prompt']
+                return cached["prompt"]
 
         # Check disk cache
         cache_path = self.get_prompt_cache_path(sample_name, model_size)
@@ -691,14 +960,14 @@ class TTSManager:
             return None
 
         try:
-            cache_data = torch.load(cache_path, map_location='cpu', weights_only=False)
+            cache_data = torch.load(cache_path, map_location="cpu", weights_only=False)
 
-            if cache_data.get('hash') != expected_hash:
+            if cache_data.get("hash") != expected_hash:
                 print(f"Sample changed, cache invalidated: {sample_name}")
                 return None
 
             # Move to device
-            cached_prompt = cache_data['prompt']
+            cached_prompt = cache_data["prompt"]
             device = get_device()
 
             if isinstance(cached_prompt, dict):
@@ -712,12 +981,16 @@ class TTSManager:
                     for item in cached_prompt
                 ]
             else:
-                prompt_items = cached_prompt.to(device) if isinstance(cached_prompt, torch.Tensor) else cached_prompt
+                prompt_items = (
+                    cached_prompt.to(device)
+                    if isinstance(cached_prompt, torch.Tensor)
+                    else cached_prompt
+                )
 
             # Store in memory cache
             self._voice_prompt_cache[cache_key] = {
-                'prompt': prompt_items,
-                'hash': expected_hash
+                "prompt": prompt_items,
+                "hash": expected_hash,
             }
 
             print(f"Loaded voice prompt from cache: {cache_path}")

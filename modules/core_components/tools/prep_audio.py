@@ -4,10 +4,12 @@ Prep Samples Tab
 Unified tool for preparing voice samples and managing finetuning datasets.
 Supports two modes via radio toggle: Samples (voice cloning) and Datasets (finetuning).
 """
+
 # Setup path for standalone testing BEFORE imports
 if __name__ == "__main__":
     import sys
     from pathlib import Path
+
     project_root = Path(__file__).parent.parent.parent.parent
     sys.path.insert(0, str(project_root))
     sys.path.insert(0, str(project_root / "modules"))
@@ -30,7 +32,7 @@ class PrepSamplesTool(Tool):
         module_name="tool_prep_audio",
         description="Prepare and manage voice samples and datasets",
         enabled=True,
-        category="preparation"
+        category="preparation",
     )
 
     @classmethod
@@ -38,21 +40,25 @@ class PrepSamplesTool(Tool):
         """Create Prep Samples tool UI."""
         components = {}
 
-        format_help_html = shared_state['format_help_html']
-        get_sample_choices = shared_state['get_sample_choices']
-        get_dataset_folders = shared_state['get_dataset_folders']
-        get_dataset_files = shared_state['get_dataset_files']
-        _user_config = shared_state['_user_config']
-        LANGUAGES = shared_state['LANGUAGES']
-        WHISPER_AVAILABLE = shared_state['WHISPER_AVAILABLE']
-        DEEPFILTER_AVAILABLE = shared_state['DEEPFILTER_AVAILABLE']
+        format_help_html = shared_state["format_help_html"]
+        get_sample_choices = shared_state["get_sample_choices"]
+        get_dataset_folders = shared_state["get_dataset_folders"]
+        get_dataset_files = shared_state["get_dataset_files"]
+        _user_config = shared_state["_user_config"]
+        LANGUAGES = shared_state["LANGUAGES"]
+        WHISPER_AVAILABLE = shared_state["WHISPER_AVAILABLE"]
+        DEEPFILTER_AVAILABLE = shared_state["DEEPFILTER_AVAILABLE"]
 
         # Let's hide dataset if train model is off
-        train_model_enabled = _user_config.get("enabled_tools", {}).get("Train Model", True)
+        train_model_enabled = _user_config.get("enabled_tools", {}).get(
+            "Train Model", True
+        )
 
         with gr.TabItem("Prep Audio Samples"):
             if train_model_enabled is True:
-                gr.Markdown("Prepare audio samples for voice cloning or finetuning datasets.")
+                gr.Markdown(
+                    "Prepare audio samples for voice cloning or finetuning datasets."
+                )
             else:
                 gr.Markdown("Prepare audio samples for voice cloning.")
 
@@ -63,9 +69,9 @@ class PrepSamplesTool(Tool):
                     if train_model_enabled is True:
                         gr.Markdown("### Select Samples or Dataset")
 
-                    components['prep_data_type'] = gr.Radio(
-                        choices=['Samples', 'Datasets'],
-                        value='Samples',
+                    components["prep_data_type"] = gr.Radio(
+                        choices=["Samples", "Datasets"],
+                        value="Samples",
                         show_label=False,
                         visible=train_model_enabled,
                     )
@@ -73,122 +79,146 @@ class PrepSamplesTool(Tool):
                     # --- Samples mode ---
                     with gr.Column(visible=True) as samples_col:
                         gr.Markdown("### Audio Samples")
-                        components['sample_lister'] = FileLister(
+                        components["sample_lister"] = FileLister(
                             value=get_sample_choices(),
                             height=250,
                             show_footer=False,
                             interactive=True,
                         )
-                    components['samples_col'] = samples_col
+                    components["samples_col"] = samples_col
 
                     # --- Datasets mode ---
                     with gr.Column(visible=False) as datasets_col:
                         gr.Markdown("### Dataset Files")
-                        components['finetune_folder_dropdown'] = gr.Dropdown(
+                        components["finetune_folder_dropdown"] = gr.Dropdown(
                             choices=["(Select Dataset)"] + get_dataset_folders(),
                             value="(Select Dataset)",
                             label="Dataset Folder",
                             info="Subfolders in datasets",
                             interactive=True,
                         )
-                        components['refresh_folder_btn'] = gr.Button("Refresh Folders", size="sm")
-                        components['dataset_lister'] = FileLister(
+                        components["refresh_folder_btn"] = gr.Button(
+                            "Refresh Folders", size="sm"
+                        )
+                        components["dataset_lister"] = FileLister(
                             value=[],
                             height=250,
                             show_footer=False,
                             interactive=True,
                         )
-                    components['datasets_col'] = datasets_col
+                    components["datasets_col"] = datasets_col
 
                     # --- Shared buttons ---
                     with gr.Row():
-                        components['refresh_preview_btn'] = gr.Button("Refresh", size="sm")
+                        components["refresh_preview_btn"] = gr.Button(
+                            "Refresh", size="sm"
+                        )
 
                     with gr.Row():
-                        components['clear_cache_btn'] = gr.Button("Clear Cache", size="sm")
-                        components['delete_btn'] = gr.Button("Delete", size="sm", variant="stop")
+                        components["clear_cache_btn"] = gr.Button(
+                            "Clear Cache", size="sm"
+                        )
+                        components["delete_btn"] = gr.Button(
+                            "Delete", size="sm", variant="stop"
+                        )
 
-                    components['existing_sample_info'] = gr.Textbox(
-                        label="Info",
-                        interactive=False,
-                        lines=3
+                    components["existing_sample_info"] = gr.Textbox(
+                        label="Info", interactive=False, lines=3
                     )
 
                     gr.Markdown("### Transcription Settings")
 
-                    available_models = ['VibeVoice ASR']
+                    available_models = ["VibeVoice ASR"]
                     if WHISPER_AVAILABLE:
-                        available_models.append('Whisper')
+                        available_models.append("Whisper")
 
-                    default_model = _user_config.get("transcribe_model", "VibeVoice ASR")
+                    default_model = _user_config.get(
+                        "transcribe_model", "VibeVoice ASR"
+                    )
                     if default_model not in available_models:
                         default_model = available_models[0]
 
-                    components['transcribe_model'] = gr.Radio(
+                    components["transcribe_model"] = gr.Radio(
                         choices=available_models,
                         value=default_model,
                         show_label=False,
-                        info="Choose transcription engine"
+                        info="Choose transcription engine",
                     )
 
-                    components['whisper_language'] = gr.Dropdown(
+                    components["whisper_language"] = gr.Dropdown(
                         choices=["Auto-detect"] + LANGUAGES[1:],
                         value=_user_config.get("whisper_language", "Auto-detect"),
                         label="Language",
-                        visible=(default_model == "Whisper")
+                        visible=(default_model == "Whisper"),
                     )
 
                 # Right column - Audio editing
                 with gr.Column(scale=2):
-                    gr.Markdown("### Add or Edit Audio Sample <small>(Drag and drop audio or video files)</small>")
+                    gr.Markdown(
+                        "### Add or Edit Audio Sample <small>(Drag and drop audio or video files)</small>"
+                    )
 
-                    components['prep_file_input'] = gr.File(
+                    components["prep_file_input"] = gr.File(
                         label="Audio or Video File",
                         type="filepath",
                         file_types=["audio", "video"],
-                        interactive=True
+                        interactive=True,
                     )
 
-                    components['prep_audio_editor'] = gr.Audio(
+                    components["prep_audio_editor"] = gr.Audio(
                         label="Audio Editor (Use Trim icon to edit)",
                         type="filepath",
                         interactive=True,
                         visible=False,
-                        elem_id="prep-audio-editor"
+                        elem_id="prep-audio-editor",
                     )
 
                     with gr.Row():
-                        components['clear_btn'] = gr.Button("Clear", scale=1, size="sm")
-                        components['clean_btn'] = gr.Button("AI Denoise", scale=2, size="sm",
-                                                            variant="secondary", visible=DEEPFILTER_AVAILABLE)
-                        components['normalize_btn'] = gr.Button("Normalize Volume", scale=2, size="sm")
-                        components['mono_btn'] = gr.Button("Convert to Mono", scale=2, size="sm")
+                        components["clear_btn"] = gr.Button("Clear", scale=1, size="sm")
+                        components["clean_btn"] = gr.Button(
+                            "AI Denoise",
+                            scale=2,
+                            size="sm",
+                            variant="secondary",
+                            visible=DEEPFILTER_AVAILABLE,
+                        )
+                        components["normalize_btn"] = gr.Button(
+                            "Normalize Volume", scale=2, size="sm"
+                        )
+                        components["mono_btn"] = gr.Button(
+                            "Convert to Mono", scale=2, size="sm"
+                        )
 
                     gr.Markdown("### Reference Text")
-                    components['transcription_output'] = gr.Textbox(
+                    components["transcription_output"] = gr.Textbox(
                         label="Text",
                         lines=4,
                         max_lines=10,
                         interactive=True,
-                        placeholder="Transcription will appear here, or enter/edit text manually..."
+                        placeholder="Transcription will appear here, or enter/edit text manually...",
                     )
 
                     with gr.Row():
-                        components['transcribe_btn'] = gr.Button("Transcribe Audio", variant="primary")
-                        components['save_btn'] = gr.Button("Save Sample", variant="primary")
+                        components["transcribe_btn"] = gr.Button(
+                            "Transcribe Audio", variant="primary"
+                        )
+                        components["save_btn"] = gr.Button(
+                            "Save Sample", variant="primary"
+                        )
 
                     # Dataset-only: batch transcribe
                     with gr.Column(visible=False) as batch_col:
-                        components['batch_transcribe_btn'] = gr.Button("Batch Transcribe All Clips",
-                                                                       variant="primary", size="lg")
-                        components['batch_replace_existing'] = gr.Checkbox(
-                            label="Replace existing transcripts",
-                            value=False
+                        components["batch_transcribe_btn"] = gr.Button(
+                            "Batch Transcribe All Clips", variant="primary", size="lg"
                         )
-                    components['batch_col'] = batch_col
+                        components["batch_replace_existing"] = gr.Checkbox(
+                            label="Replace existing transcripts", value=False
+                        )
+                    components["batch_col"] = batch_col
 
-                    components['prep_status'] = gr.Textbox(label="Status", interactive=False,
-                                                           lines=1, max_lines=15)
+                    components["prep_status"] = gr.Textbox(
+                        label="Status", interactive=False, lines=1, max_lines=15
+                    )
 
             return components
 
@@ -197,29 +227,33 @@ class PrepSamplesTool(Tool):
         """Wire up Prep Samples tab events."""
 
         # Shared utilities
-        get_sample_choices = shared_state['get_sample_choices']
-        load_sample_details = shared_state['load_sample_details']
-        get_prompt_cache_path = shared_state['get_prompt_cache_path']
-        play_completion_beep = shared_state.get('play_completion_beep')
-        save_preference = shared_state['save_preference']
-        show_confirmation_modal_js = shared_state['show_confirmation_modal_js']
-        show_input_modal_js = shared_state['show_input_modal_js']
-        confirm_trigger = shared_state['confirm_trigger']
-        input_trigger = shared_state['input_trigger']
-        SAMPLES_DIR = shared_state['SAMPLES_DIR']
-        DATASETS_DIR = shared_state['DATASETS_DIR']
-        get_dataset_folders = shared_state['get_dataset_folders']
-        get_dataset_files = shared_state['get_dataset_files']
+        get_sample_choices = shared_state["get_sample_choices"]
+        load_sample_details = shared_state["load_sample_details"]
+        get_prompt_cache_path = shared_state["get_prompt_cache_path"]
+        get_luxtts_prompt_cache_files = shared_state.get(
+            "get_luxtts_prompt_cache_files"
+        )
+        play_completion_beep = shared_state.get("play_completion_beep")
+        save_preference = shared_state["save_preference"]
+        show_confirmation_modal_js = shared_state["show_confirmation_modal_js"]
+        show_input_modal_js = shared_state["show_input_modal_js"]
+        confirm_trigger = shared_state["confirm_trigger"]
+        input_trigger = shared_state["input_trigger"]
+        SAMPLES_DIR = shared_state["SAMPLES_DIR"]
+        DATASETS_DIR = shared_state["DATASETS_DIR"]
+        get_dataset_folders = shared_state["get_dataset_folders"]
+        get_dataset_files = shared_state["get_dataset_files"]
+        tts_manager = shared_state.get("tts_manager")
 
         # Audio utilities
-        is_audio_file = shared_state['is_audio_file']
-        is_video_file = shared_state['is_video_file']
-        extract_audio_from_video = shared_state['extract_audio_from_video']
-        get_audio_duration = shared_state['get_audio_duration']
-        format_time = shared_state['format_time']
-        normalize_audio = shared_state['normalize_audio']
-        convert_to_mono = shared_state['convert_to_mono']
-        clean_audio = shared_state['clean_audio']
+        is_audio_file = shared_state["is_audio_file"]
+        is_video_file = shared_state["is_video_file"]
+        extract_audio_from_video = shared_state["extract_audio_from_video"]
+        get_audio_duration = shared_state["get_audio_duration"]
+        format_time = shared_state["format_time"]
+        normalize_audio = shared_state["normalize_audio"]
+        convert_to_mono = shared_state["convert_to_mono"]
+        clean_audio = shared_state["clean_audio"]
 
         # ASR manager (singleton)
         asr_manager = get_asr_manager()
@@ -236,6 +270,7 @@ class PrepSamplesTool(Tool):
             selected = lister_value.get("selected", [])
             if len(selected) == 1:
                 from modules.core_components.tools import strip_sample_extension
+
                 return strip_sample_extension(selected[0])
             return None
 
@@ -260,18 +295,18 @@ class PrepSamplesTool(Tool):
             """Switch between Samples and Datasets mode."""
             is_ds = is_dataset_mode(data_type)
             return (
-                gr.update(visible=not is_ds),    # samples_col
-                gr.update(visible=is_ds),        # datasets_col
-                gr.update(visible=not is_ds),    # clear_btn
-                gr.update(visible=not is_ds),    # clear_cache_btn
-                gr.update(visible=not is_ds),    # refresh_preview_btn
-                gr.update(visible=is_ds),        # batch_col
-                gr.update(visible=not is_ds),    # prep_file_input
-                gr.update(visible=is_ds),        # prep_audio_editor visibility
-                None,                            # prep_audio_editor value
-                "",                              # transcription_output
-                "",                              # prep_status
-                "",                              # existing_sample_info
+                gr.update(visible=not is_ds),  # samples_col
+                gr.update(visible=is_ds),  # datasets_col
+                gr.update(visible=not is_ds),  # clear_btn
+                gr.update(visible=not is_ds),  # clear_cache_btn
+                gr.update(visible=not is_ds),  # refresh_preview_btn
+                gr.update(visible=is_ds),  # batch_col
+                gr.update(visible=not is_ds),  # prep_file_input
+                gr.update(visible=is_ds),  # prep_audio_editor visibility
+                None,  # prep_audio_editor value
+                "",  # transcription_output
+                "",  # prep_status
+                "",  # existing_sample_info
             )
 
         # ===== Selection handlers =====
@@ -283,7 +318,13 @@ class PrepSamplesTool(Tool):
                 return gr.update(visible=False), gr.update(visible=True), None, "", ""
 
             audio_path, ref_text, info_text = load_sample_details(sample_name)
-            return gr.update(visible=True), gr.update(visible=False), audio_path, ref_text, info_text
+            return (
+                gr.update(visible=True),
+                gr.update(visible=False),
+                audio_path,
+                ref_text,
+                info_text,
+            )
 
         def on_dataset_selection_change(folder, lister_value):
             """Load audio and transcript for selected dataset item."""
@@ -323,7 +364,10 @@ class PrepSamplesTool(Tool):
                     return None, message
                 elif is_audio_file(audio_file):
                     duration = get_audio_duration(audio_file)
-                    return audio_file, f"Duration: {format_time(duration)} ({duration:.2f}s)"
+                    return (
+                        audio_file,
+                        f"Duration: {format_time(duration)} ({duration:.2f}s)",
+                    )
                 else:
                     return None, "Unsupported file type"
             except Exception as e:
@@ -374,11 +418,13 @@ class PrepSamplesTool(Tool):
                     return "No sample selected", gr.update(), gr.update()
 
                 import os
+
                 deleted_count = 0
                 errors = []
 
                 for display_name in sample_lister["selected"]:
                     from modules.core_components.tools import strip_sample_extension
+
                     sample_name = strip_sample_extension(display_name)
                     try:
                         wav_path = SAMPLES_DIR / f"{sample_name}.wav"
@@ -391,6 +437,11 @@ class PrepSamplesTool(Tool):
                             cache_path = get_prompt_cache_path(sample_name, model_size)
                             if cache_path.exists():
                                 os.remove(cache_path)
+                        if get_luxtts_prompt_cache_files:
+                            for lux_cache in get_luxtts_prompt_cache_files(sample_name):
+                                lux_cache.unlink(missing_ok=True)
+                        if tts_manager:
+                            tts_manager.clear_prompt_cache_for_sample(sample_name)
                         deleted_count += 1
                     except Exception as e:
                         errors.append(f"{sample_name}: {str(e)}")
@@ -411,22 +462,36 @@ class PrepSamplesTool(Tool):
                 return "No sample selected", gr.update()
             try:
                 import os
+
                 deleted = []
                 for model_size in ["0.6B", "1.7B"]:
                     cache_path = get_prompt_cache_path(sample_name, model_size)
                     if cache_path.exists():
                         os.remove(cache_path)
                         deleted.append(model_size)
+                lux_deleted = 0
+                if get_luxtts_prompt_cache_files:
+                    for lux_cache in get_luxtts_prompt_cache_files(sample_name):
+                        lux_cache.unlink(missing_ok=True)
+                        lux_deleted += 1
+                if tts_manager:
+                    tts_manager.clear_prompt_cache_for_sample(sample_name)
                 if deleted:
                     _, _, new_info = load_sample_details(sample_name)
-                    return f"Cache cleared for: {', '.join(deleted)}", new_info
+                    lux_msg = f", LuxTTS ({lux_deleted})" if lux_deleted else ""
+                    return f"Cache cleared for: {', '.join(deleted)}{lux_msg}", new_info
+                if lux_deleted:
+                    _, _, new_info = load_sample_details(sample_name)
+                    return f"Cache cleared for: LuxTTS ({lux_deleted})", new_info
                 return "No cache files found", gr.update()
             except Exception as e:
                 return f"Error clearing cache: {str(e)}", gr.update()
 
         # ===== Transcribe (shared) =====
 
-        def transcribe_audio_handler(audio_file, whisper_language, transcribe_model, progress=gr.Progress()):
+        def transcribe_audio_handler(
+            audio_file, whisper_language, transcribe_model, progress=gr.Progress()
+        ):
             """Transcribe audio using Whisper or VibeVoice ASR."""
             if audio_file is None:
                 return "Please load an audio file first.", ""
@@ -445,10 +510,16 @@ class PrepSamplesTool(Tool):
                     options = {}
                     if whisper_language and whisper_language != "Auto-detect":
                         lang_code = {
-                            "English": "en", "Chinese": "zh", "Japanese": "ja",
-                            "Korean": "ko", "German": "de", "French": "fr",
-                            "Russian": "ru", "Portuguese": "pt", "Spanish": "es",
-                            "Italian": "it"
+                            "English": "en",
+                            "Chinese": "zh",
+                            "Japanese": "ja",
+                            "Korean": "ko",
+                            "German": "de",
+                            "French": "fr",
+                            "Russian": "ru",
+                            "Portuguese": "pt",
+                            "Spanish": "es",
+                            "Italian": "it",
                         }.get(whisper_language, None)
                         if lang_code:
                             options["language"] = lang_code
@@ -458,9 +529,9 @@ class PrepSamplesTool(Tool):
                 transcription = result["text"].strip()
 
                 if transcribe_model == "VibeVoice ASR":
-                    transcription = re.sub(r'\[.*?\]\s*:', '', transcription)
-                    transcription = re.sub(r'\[.*?\]', '', transcription)
-                    transcription = ' '.join(transcription.split())
+                    transcription = re.sub(r"\[.*?\]\s*:", "", transcription)
+                    transcription = re.sub(r"\[.*?\]", "", transcription)
+                    transcription = " ".join(transcription.split())
 
                 if play_completion_beep:
                     play_completion_beep()
@@ -469,6 +540,7 @@ class PrepSamplesTool(Tool):
 
             except Exception as e:
                 import traceback
+
                 print(f"Error in transcribe:\n{traceback.format_exc()}")
                 return f"Error transcribing: {str(e)}", ""
 
@@ -494,7 +566,7 @@ class PrepSamplesTool(Tool):
                             results.append(f"Audio saved to {filename}")
                     else:
                         sr, audio_data = audio
-                        sf.write(str(audio_path), audio_data, sr, subtype='PCM_16')
+                        sf.write(str(audio_path), audio_data, sr, subtype="PCM_16")
                         results.append(f"Audio saved to {filename}")
                 except Exception as e:
                     results.append(f"Error saving audio: {str(e)}")
@@ -510,7 +582,9 @@ class PrepSamplesTool(Tool):
 
             return " | ".join(results) if results else "Nothing to save"
 
-        def save_btn_handler(data_type, audio, transcription, folder, dataset_lister, sample_lister):
+        def save_btn_handler(
+            data_type, audio, transcription, folder, dataset_lister, sample_lister
+        ):
             """Handle save button click - only acts in dataset mode."""
             if not is_dataset_mode(data_type):
                 # Samples mode: handled by JS modal + input_trigger
@@ -533,7 +607,9 @@ class PrepSamplesTool(Tool):
                 if not audio:
                     return "No audio file to save", gr.update()
 
-                clean_name = "".join(c if c.isalnum() or c in "-_ " else "" for c in sample_name).strip()
+                clean_name = "".join(
+                    c if c.isalnum() or c in "-_ " else "" for c in sample_name
+                ).strip()
                 clean_name = clean_name.replace(" ", "_")
                 if not clean_name:
                     return "Invalid sample name", gr.update()
@@ -541,7 +617,11 @@ class PrepSamplesTool(Tool):
                 try:
                     import json
 
-                    cleaned_text = re.sub(r'\[.*?\]\s*', '', transcription).strip() if transcription else ""
+                    cleaned_text = (
+                        re.sub(r"\[.*?\]\s*", "", transcription).strip()
+                        if transcription
+                        else ""
+                    )
 
                     audio_path = Path(audio).resolve()
                     original_path = (SAMPLES_DIR / f"{clean_name}.wav").resolve()
@@ -552,9 +632,13 @@ class PrepSamplesTool(Tool):
                     json_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
                     if audio_unmodified:
-                        return f"Sample '{clean_name}' updated (text only)", get_sample_choices()
+                        return (
+                            f"Sample '{clean_name}' updated (text only)",
+                            get_sample_choices(),
+                        )
 
                     import os
+
                     audio_data, sr = sf.read(audio)
                     sf.write(str(SAMPLES_DIR / f"{clean_name}.wav"), audio_data, sr)
 
@@ -564,9 +648,28 @@ class PrepSamplesTool(Tool):
                         if cache_path.exists():
                             os.remove(cache_path)
                             cleared.append(model_size)
+                    lux_cleared = 0
+                    if get_luxtts_prompt_cache_files:
+                        for lux_cache in get_luxtts_prompt_cache_files(clean_name):
+                            lux_cache.unlink(missing_ok=True)
+                            lux_cleared += 1
+                    if tts_manager:
+                        tts_manager.clear_prompt_cache_for_sample(clean_name)
 
-                    cache_msg = f", cache cleared ({', '.join(cleared)})" if cleared else ""
-                    return f"Sample '{clean_name}' saved (audio + text{cache_msg})", get_sample_choices()
+                    cache_details = []
+                    if cleared:
+                        cache_details.append(", ".join(cleared))
+                    if lux_cleared:
+                        cache_details.append(f"LuxTTS {lux_cleared}")
+                    cache_msg = (
+                        f", cache cleared ({'; '.join(cache_details)})"
+                        if cache_details
+                        else ""
+                    )
+                    return (
+                        f"Sample '{clean_name}' saved (audio + text{cache_msg})",
+                        get_sample_choices(),
+                    )
 
                 except Exception as e:
                     return f"Error saving sample: {str(e)}", gr.update()
@@ -575,7 +678,9 @@ class PrepSamplesTool(Tool):
 
         # ===== Batch transcribe (dataset mode only) =====
 
-        def batch_transcribe_handler(folder, replace_existing, language, transcribe_model, progress=gr.Progress()):
+        def batch_transcribe_handler(
+            folder, replace_existing, language, transcribe_model, progress=gr.Progress()
+        ):
             """Batch transcribe all audio files in a dataset folder."""
             if not folder or folder in ("(No folders)", "(Select Dataset)"):
                 return "Please select a dataset folder first."
@@ -585,20 +690,27 @@ class PrepSamplesTool(Tool):
                 if not base_dir.exists():
                     return f"Folder not found: {folder}"
 
-                audio_files = sorted(list(base_dir.glob("*.wav")) + list(base_dir.glob("*.mp3")))
+                audio_files = sorted(
+                    list(base_dir.glob("*.wav")) + list(base_dir.glob("*.mp3"))
+                )
                 if not audio_files:
                     return f"No audio files found in {folder}"
 
-                files_to_process = [f for f in audio_files
-                                    if not f.with_suffix(".txt").exists() or replace_existing]
+                files_to_process = [
+                    f
+                    for f in audio_files
+                    if not f.with_suffix(".txt").exists() or replace_existing
+                ]
                 if not files_to_process:
-                    return (f"All {len(audio_files)} files already have transcripts. "
-                            "Check 'Replace existing' to re-transcribe.")
+                    return (
+                        f"All {len(audio_files)} files already have transcripts. "
+                        "Check 'Replace existing' to re-transcribe."
+                    )
 
                 status_log = [
                     f"Batch transcribing folder: {folder}",
                     f"Found {len(audio_files)} audio files ({len(files_to_process)} to process)",
-                    ""
+                    "",
                 ]
 
                 # Load model once
@@ -621,10 +733,16 @@ class PrepSamplesTool(Tool):
                         return f"Error: {str(e)}"
                     if language and language != "Auto-detect":
                         lang_code = {
-                            "English": "en", "Chinese": "zh", "Japanese": "ja",
-                            "Korean": "ko", "German": "de", "French": "fr",
-                            "Russian": "ru", "Portuguese": "pt", "Spanish": "es",
-                            "Italian": "it"
+                            "English": "en",
+                            "Chinese": "zh",
+                            "Japanese": "ja",
+                            "Korean": "ko",
+                            "German": "de",
+                            "French": "fr",
+                            "Russian": "ru",
+                            "Portuguese": "pt",
+                            "Spanish": "es",
+                            "Italian": "it",
                         }.get(language, None)
                         if lang_code:
                             options["language"] = lang_code
@@ -638,23 +756,30 @@ class PrepSamplesTool(Tool):
                     txt_file = audio_file.with_suffix(".txt")
 
                     if txt_file.exists() and not replace_existing:
-                        status_log.append(f"Skipped: {audio_file.name} (transcript exists)")
+                        status_log.append(
+                            f"Skipped: {audio_file.name} (transcript exists)"
+                        )
                         skipped_count += 1
                         continue
 
                     progress_val = 0.1 + (0.9 * i / len(audio_files))
-                    progress(progress_val,
-                             desc=f"Transcribing {i + 1}/{len(audio_files)}: {audio_file.name[:30]}...")
+                    progress(
+                        progress_val,
+                        desc=f"Transcribing {i + 1}/{len(audio_files)}: {audio_file.name[:30]}...",
+                    )
 
                     try:
-                        result = model.transcribe(str(audio_file), **options) if transcribe_model != "VibeVoice ASR" \
+                        result = (
+                            model.transcribe(str(audio_file), **options)
+                            if transcribe_model != "VibeVoice ASR"
                             else model.transcribe(str(audio_file))
+                        )
 
                         text = result["text"].strip()
                         if transcribe_model == "VibeVoice ASR":
-                            text = re.sub(r'\[.*?\]\s*:', '', text)
-                            text = re.sub(r'\[.*?\]', '', text)
-                            text = ' '.join(text.split())
+                            text = re.sub(r"\[.*?\]\s*:", "", text)
+                            text = re.sub(r"\[.*?\]", "", text)
+                            text = " ".join(text.split())
 
                         txt_file.write_text(text, encoding="utf-8")
                         status_log.append(f"{audio_file.name} -> {len(text)} chars")
@@ -664,14 +789,17 @@ class PrepSamplesTool(Tool):
                         status_log.append(f"Error: {audio_file.name} - {str(e)}")
                         error_count += 1
 
-                status_log.extend([
-                    "=" * 60, "",
-                    "Summary:",
-                    f"   Transcribed: {transcribed_count}",
-                    f"   Skipped: {skipped_count}",
-                    f"   Errors: {error_count}",
-                    f"   Total: {len(audio_files)}"
-                ])
+                status_log.extend(
+                    [
+                        "=" * 60,
+                        "",
+                        "Summary:",
+                        f"   Transcribed: {transcribed_count}",
+                        f"   Skipped: {skipped_count}",
+                        f"   Errors: {error_count}",
+                        f"   Total: {len(audio_files)}",
+                    ]
+                )
 
                 progress(1.0, desc="Batch transcription complete!")
                 if play_completion_beep:
@@ -687,63 +815,75 @@ class PrepSamplesTool(Tool):
         # ====================================================
 
         # --- Mode switching ---
-        components['prep_data_type'].change(
+        components["prep_data_type"].change(
             on_mode_change,
-            inputs=[components['prep_data_type']],
+            inputs=[components["prep_data_type"]],
             outputs=[
-                components['samples_col'],
-                components['datasets_col'],
-                components['clear_btn'],
-                components['clear_cache_btn'],
-                components['refresh_preview_btn'],
-                components['batch_col'],
-                components['prep_file_input'],
-                components['prep_audio_editor'],    # visibility
-                components['prep_audio_editor'],    # value (clear)
-                components['transcription_output'],
-                components['prep_status'],
-                components['existing_sample_info'],
-            ]
+                components["samples_col"],
+                components["datasets_col"],
+                components["clear_btn"],
+                components["clear_cache_btn"],
+                components["refresh_preview_btn"],
+                components["batch_col"],
+                components["prep_file_input"],
+                components["prep_audio_editor"],  # visibility
+                components["prep_audio_editor"],  # value (clear)
+                components["transcription_output"],
+                components["prep_status"],
+                components["existing_sample_info"],
+            ],
         )
 
         # --- Sample lister events ---
-        components['sample_lister'].change(
+        components["sample_lister"].change(
             on_sample_selection_change,
-            inputs=[components['sample_lister']],
-            outputs=[components['prep_audio_editor'], components['prep_file_input'],
-                     components['prep_audio_editor'], components['transcription_output'],
-                     components['existing_sample_info']]
+            inputs=[components["sample_lister"]],
+            outputs=[
+                components["prep_audio_editor"],
+                components["prep_file_input"],
+                components["prep_audio_editor"],
+                components["transcription_output"],
+                components["existing_sample_info"],
+            ],
         )
 
-        components['sample_lister'].double_click(
+        components["sample_lister"].double_click(
             fn=None,
-            js="() => { setTimeout(() => { const btn = document.querySelector('#prep-audio-editor .play-pause-button'); if (btn) btn.click(); }, 150); }"
+            js="() => { setTimeout(() => { const btn = document.querySelector('#prep-audio-editor .play-pause-button'); if (btn) btn.click(); }, 150); }",
         )
 
         # --- Dataset lister events ---
-        components['finetune_folder_dropdown'].change(
+        components["finetune_folder_dropdown"].change(
             lambda folder: get_dataset_files(folder),
-            inputs=[components['finetune_folder_dropdown']],
-            outputs=[components['dataset_lister']]
+            inputs=[components["finetune_folder_dropdown"]],
+            outputs=[components["dataset_lister"]],
         )
 
-        components['refresh_folder_btn'].click(
-            lambda: gr.update(choices=["(Select Dataset)"] + get_dataset_folders(),
-                              value="(Select Dataset)"),
-            outputs=[components['finetune_folder_dropdown']]
+        components["refresh_folder_btn"].click(
+            lambda: gr.update(
+                choices=["(Select Dataset)"] + get_dataset_folders(),
+                value="(Select Dataset)",
+            ),
+            outputs=[components["finetune_folder_dropdown"]],
         )
 
-        components['dataset_lister'].change(
+        components["dataset_lister"].change(
             on_dataset_selection_change,
-            inputs=[components['finetune_folder_dropdown'], components['dataset_lister']],
-            outputs=[components['prep_audio_editor'],
-                     components['prep_audio_editor'], components['transcription_output'],
-                     components['existing_sample_info']]
+            inputs=[
+                components["finetune_folder_dropdown"],
+                components["dataset_lister"],
+            ],
+            outputs=[
+                components["prep_audio_editor"],
+                components["prep_audio_editor"],
+                components["transcription_output"],
+                components["existing_sample_info"],
+            ],
         )
 
-        components['dataset_lister'].double_click(
+        components["dataset_lister"].double_click(
             fn=None,
-            js="() => { setTimeout(() => { const btn = document.querySelector('#prep-audio-editor .play-pause-button'); if (btn) btn.click(); }, 150); }"
+            js="() => { setTimeout(() => { const btn = document.querySelector('#prep-audio-editor .play-pause-button'); if (btn) btn.click(); }, 150); }",
         )
 
         # --- Refresh (mode-aware) ---
@@ -752,10 +892,13 @@ class PrepSamplesTool(Tool):
                 return gr.update(), get_dataset_files(folder)
             return get_sample_choices(), gr.update()
 
-        components['refresh_preview_btn'].click(
+        components["refresh_preview_btn"].click(
             refresh_handler,
-            inputs=[components['prep_data_type'], components['finetune_folder_dropdown']],
-            outputs=[components['sample_lister'], components['dataset_lister']]
+            inputs=[
+                components["prep_data_type"],
+                components["finetune_folder_dropdown"],
+            ],
+            outputs=[components["sample_lister"], components["dataset_lister"]],
         )
 
         # --- Delete (mode-aware JS context) ---
@@ -763,13 +906,13 @@ class PrepSamplesTool(Tool):
             title="Delete Sample(s)?",
             message="This will permanently delete the selected sample(s), metadata, and cached files. This action cannot be undone.",
             confirm_button_text="Delete",
-            context="sample_"
+            context="sample_",
         )
         dataset_delete_js = show_confirmation_modal_js(
             title="Delete Dataset Item(s)?",
             message="This will permanently delete the selected audio file(s) and transcript(s). This action cannot be undone.",
             confirm_button_text="Delete",
-            context="finetune_"
+            context="finetune_",
         )
         delete_js = f"""
         (dataType) => {{
@@ -783,74 +926,86 @@ class PrepSamplesTool(Tool):
         }}
         """
 
-        components['delete_btn'].click(
-            fn=None,
-            inputs=[components['prep_data_type']],
-            js=delete_js
+        components["delete_btn"].click(
+            fn=None, inputs=[components["prep_data_type"]], js=delete_js
         )
 
         confirm_trigger.change(
             delete_handler,
-            inputs=[confirm_trigger, components['prep_data_type'],
-                    components['sample_lister'], components['dataset_lister'],
-                    components['finetune_folder_dropdown']],
-            outputs=[components['prep_status'], components['sample_lister'],
-                     components['dataset_lister']]
+            inputs=[
+                confirm_trigger,
+                components["prep_data_type"],
+                components["sample_lister"],
+                components["dataset_lister"],
+                components["finetune_folder_dropdown"],
+            ],
+            outputs=[
+                components["prep_status"],
+                components["sample_lister"],
+                components["dataset_lister"],
+            ],
         )
 
         # --- Clear cache (samples only) ---
-        components['clear_cache_btn'].click(
+        components["clear_cache_btn"].click(
             clear_sample_cache_handler,
-            inputs=[components['sample_lister']],
-            outputs=[components['prep_status'], components['existing_sample_info']]
+            inputs=[components["sample_lister"]],
+            outputs=[components["prep_status"], components["existing_sample_info"]],
         )
 
         # --- Clear button (samples only) ---
-        components['clear_btn'].click(
+        components["clear_btn"].click(
             lambda: (gr.update(visible=True), gr.update(visible=False), None, ""),
-            outputs=[components['prep_file_input'], components['prep_audio_editor'],
-                     components['prep_audio_editor'], components['prep_status']]
+            outputs=[
+                components["prep_file_input"],
+                components["prep_audio_editor"],
+                components["prep_audio_editor"],
+                components["prep_status"],
+            ],
         )
 
         # --- File input (samples mode - load new audio/video) ---
-        components['prep_file_input'].change(
+        components["prep_file_input"].change(
             on_prep_audio_load_handler,
-            inputs=[components['prep_file_input']],
-            outputs=[components['prep_audio_editor'], components['prep_status']]
+            inputs=[components["prep_file_input"]],
+            outputs=[components["prep_audio_editor"], components["prep_status"]],
         ).then(
             lambda audio: (
                 gr.update(visible=audio is not None),
-                gr.update(visible=audio is None)
+                gr.update(visible=audio is None),
             ),
-            inputs=[components['prep_audio_editor']],
-            outputs=[components['prep_audio_editor'], components['prep_file_input']]
+            inputs=[components["prep_audio_editor"]],
+            outputs=[components["prep_audio_editor"], components["prep_file_input"]],
         )
 
         # --- Audio processing (shared) ---
-        components['normalize_btn'].click(
+        components["normalize_btn"].click(
             normalize_audio,
-            inputs=[components['prep_audio_editor']],
-            outputs=[components['prep_audio_editor'], components['prep_status']]
+            inputs=[components["prep_audio_editor"]],
+            outputs=[components["prep_audio_editor"], components["prep_status"]],
         )
 
-        components['mono_btn'].click(
+        components["mono_btn"].click(
             convert_to_mono,
-            inputs=[components['prep_audio_editor']],
-            outputs=[components['prep_audio_editor'], components['prep_status']]
+            inputs=[components["prep_audio_editor"]],
+            outputs=[components["prep_audio_editor"], components["prep_status"]],
         )
 
-        components['clean_btn'].click(
+        components["clean_btn"].click(
             clean_audio,
-            inputs=[components['prep_audio_editor']],
-            outputs=[components['prep_audio_editor'], components['prep_status']]
+            inputs=[components["prep_audio_editor"]],
+            outputs=[components["prep_audio_editor"], components["prep_status"]],
         )
 
         # --- Transcribe (shared) ---
-        components['transcribe_btn'].click(
+        components["transcribe_btn"].click(
             transcribe_audio_handler,
-            inputs=[components['prep_audio_editor'], components['whisper_language'],
-                    components['transcribe_model']],
-            outputs=[components['transcription_output'], components['prep_status']]
+            inputs=[
+                components["prep_audio_editor"],
+                components["whisper_language"],
+                components["transcribe_model"],
+            ],
+            outputs=[components["transcription_output"], components["prep_status"]],
         )
 
         # --- Save button (mode-aware) ---
@@ -860,7 +1015,7 @@ class PrepSamplesTool(Tool):
             title="Save Voice Sample",
             message="Enter a name for this voice sample:",
             placeholder="e.g., MyVoice, Female-Accent, John-Doe",
-            context="save_sample_"
+            context="save_sample_",
         )
         save_js = f"""
         (dataType, audio, transcription, folder, datasetLister, sampleLister) => {{
@@ -876,44 +1031,57 @@ class PrepSamplesTool(Tool):
         }}
         """
 
-        components['save_btn'].click(
+        components["save_btn"].click(
             fn=save_btn_handler,
-            inputs=[components['prep_data_type'], components['prep_audio_editor'],
-                    components['transcription_output'], components['finetune_folder_dropdown'],
-                    components['dataset_lister'], components['sample_lister']],
-            outputs=[components['prep_status']],
-            js=save_js
+            inputs=[
+                components["prep_data_type"],
+                components["prep_audio_editor"],
+                components["transcription_output"],
+                components["finetune_folder_dropdown"],
+                components["dataset_lister"],
+                components["sample_lister"],
+            ],
+            outputs=[components["prep_status"]],
+            js=save_js,
         )
 
         # Save sample input handler (after modal, samples mode only)
         input_trigger.change(
             handle_save_sample_input,
-            inputs=[input_trigger, components['prep_audio_editor'],
-                    components['transcription_output']],
-            outputs=[components['prep_status'], components['sample_lister']]
+            inputs=[
+                input_trigger,
+                components["prep_audio_editor"],
+                components["transcription_output"],
+            ],
+            outputs=[components["prep_status"], components["sample_lister"]],
         )
 
         # --- Batch transcribe (dataset mode only) ---
-        components['batch_transcribe_btn'].click(
+        components["batch_transcribe_btn"].click(
             batch_transcribe_handler,
-            inputs=[components['finetune_folder_dropdown'],
-                    components['batch_replace_existing'],
-                    components['whisper_language'], components['transcribe_model']],
-            outputs=[components['prep_status']]
+            inputs=[
+                components["finetune_folder_dropdown"],
+                components["batch_replace_existing"],
+                components["whisper_language"],
+                components["transcribe_model"],
+            ],
+            outputs=[components["prep_status"]],
         )
 
         # --- Save preferences ---
-        components['transcribe_model'].change(
-            lambda x: (save_preference("transcribe_model", x),
-                       gr.update(visible=(x == "Whisper")))[1],
-            inputs=[components['transcribe_model']],
-            outputs=[components['whisper_language']]
+        components["transcribe_model"].change(
+            lambda x: (
+                save_preference("transcribe_model", x),
+                gr.update(visible=(x == "Whisper")),
+            )[1],
+            inputs=[components["transcribe_model"]],
+            outputs=[components["whisper_language"]],
         )
 
-        components['whisper_language'].change(
+        components["whisper_language"].change(
             lambda x: save_preference("whisper_language", x),
-            inputs=[components['whisper_language']],
-            outputs=[]
+            inputs=[components["whisper_language"]],
+            outputs=[],
         )
 
 
@@ -924,4 +1092,5 @@ get_tool_class = lambda: PrepSamplesTool
 if __name__ == "__main__":
     """Standalone testing of Prep Samples tool."""
     from modules.core_components.tools import run_tool_standalone
+
     run_tool_standalone(PrepSamplesTool, port=7865, title="Prep Samples - Standalone")

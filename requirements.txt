@@ -3,6 +3,7 @@
 
 # Core TTS and audio processing dependencies (all platforms)
 qwen-tts
+LuxTTS @ git+https://github.com/ysharma3501/LuxTTS
 librosa
 torchaudio
 soundfile
@@ -11,6 +12,21 @@ einops
 huggingface_hub
 onnxruntime
 onnxruntime-gpu
+--find-links
+https://k2-fsa.github.io/icefall/piper_phonemize.html
+lhotse
+safetensors
+tensorboard
+vocos
+pydub
+git+https://github.com/ysharma3501/LinaCodec.git
+transformers<=4.57.6
+cn2an
+inflect
+jieba
+piper_phonemize
+pypinyin
+setuptools<81
 
 # Web UI and utilities
 gradio

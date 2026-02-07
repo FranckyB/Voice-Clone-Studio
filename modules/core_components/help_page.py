@@ -6,10 +6,12 @@ Displays documentation and tips for using Voice Clone Studio.
 Standalone testing:
     python -m modules.core_components.tools.help_page
 """
+
 # Setup path for standalone testing BEFORE imports
 if __name__ == "__main__":
     import sys
     from pathlib import Path
+
     project_root = Path(__file__).parent.parent.parent.parent
     sys.path.insert(0, str(project_root))
 
@@ -31,7 +33,7 @@ def show_voice_clone_help():
         #### How it works:
         1. **Select a voice sample** from your samples folder
         2. **Enter text** you want to generate in that voice
-        3. **Choose engine**: Qwen3 (Small/Large) or VibeVoice (Small/Large)
+        3. **Choose engine**: Qwen3 (Small/Large), VibeVoice (Small/Large), or LuxTTS
         4. **Set language** (Auto-detect recommended)
         5. **Click Generate** - first time processing creates a cached prompt
 
@@ -42,6 +44,7 @@ def show_voice_clone_help():
         - **Qwen3-Large (1.7B)**: Best quality, higher VRAM
         - **VibeVoice-Small (1.5B)**: Alternative engine, good for long-form
         - **VibeVoice-Large**: Highest quality, most VRAM
+        - **LuxTTS (Default)**: 48 kHz output, fast voice cloning
 
         &nbsp;
 
@@ -49,7 +52,7 @@ def show_voice_clone_help():
         - ⚡ **First generation** for a sample takes longer (creates prompt cache)
         - ⚡ **Subsequent generations** use cached prompt and are much faster
         - 🔄 Cache is **per model size** - switching sizes recreates cache
-        - 💾 Prompts are saved to `samples/` folder as `.prompt` files
+        - 💾 Qwen caches are saved as `.pt` files; LuxTTS caches are `.prompt` files
 
         &nbsp;
 
@@ -494,7 +497,7 @@ class HelpGuideTool(Tool):
         module_name="tool_help_page",
         description="Documentation and usage tips",
         enabled=True,
-        category="utility"
+        category="utility",
     )
 
     @classmethod
@@ -505,11 +508,11 @@ class HelpGuideTool(Tool):
         (e.g. in an Accordion at the bottom of the page).
         """
         components = {}
-        format_help_html = shared_state.get('format_help_html')
+        format_help_html = shared_state.get("format_help_html")
 
         gr.Markdown("# Voice Clone Studio - Help & Guide")
 
-        components['help_topic'] = gr.Radio(
+        components["help_topic"] = gr.Radio(
             choices=[
                 "Voice Clone",
                 "Voice Presets",
@@ -518,18 +521,18 @@ class HelpGuideTool(Tool):
                 "Prep Samples",
                 "Prep Dataset",
                 "Train Model",
-                "Tips & Tricks"
+                "Tips & Tricks",
             ],
             value="Voice Clone",
             show_label=False,
             interactive=True,
-            container=False
+            container=False,
         )
 
-        components['help_content'] = gr.HTML(
+        components["help_content"] = gr.HTML(
             value=format_help_html(show_voice_clone_help()),
             container=True,
-            padding=True
+            padding=True,
         )
 
         return components
@@ -540,12 +543,12 @@ class HelpGuideTool(Tool):
         components = {}
 
         # Extract needed items from shared_state
-        format_help_html = shared_state.get('format_help_html')
+        format_help_html = shared_state.get("format_help_html")
 
         with gr.TabItem("Help Guide"):
             gr.Markdown("# Voice Clone Studio - Help & Guide")
 
-            components['help_topic'] = gr.Radio(
+            components["help_topic"] = gr.Radio(
                 choices=[
                     "Voice Clone",
                     "Voice Presets",
@@ -554,18 +557,18 @@ class HelpGuideTool(Tool):
                     "Prep Samples",
                     "Prep Dataset",
                     "Train Model",
-                    "Tips & Tricks"
+                    "Tips & Tricks",
                 ],
                 value="Voice Clone",
                 show_label=False,
                 interactive=True,
-                container=False
+                container=False,
             )
 
-            components['help_content'] = gr.HTML(
+            components["help_content"] = gr.HTML(
                 value=format_help_html(show_voice_clone_help()),
                 container=True,
-                padding=True
+                padding=True,
             )
 
         return components
@@ -575,7 +578,7 @@ class HelpGuideTool(Tool):
         """Wire up Help Guide events."""
 
         # Extract needed items from shared_state
-        format_help_html = shared_state.get('format_help_html')
+        format_help_html = shared_state.get("format_help_html")
 
         def show_help(topic):
             """Show help for selected topic."""
@@ -587,15 +590,15 @@ class HelpGuideTool(Tool):
                 "Prep Samples": show_prep_audio_help,
                 "Prep Dataset": show_dataset_help,
                 "Train Model": show_train_help,
-                "Tips & Tricks": show_tips_help
+                "Tips & Tricks": show_tips_help,
             }
             return format_help_html(help_map[topic]())
 
         # Event handler for radio selection
-        components['help_topic'].change(
+        components["help_topic"].change(
             fn=show_help,
-            inputs=components['help_topic'],
-            outputs=components['help_content']
+            inputs=components["help_topic"],
+            outputs=components["help_content"],
         )
 
 
@@ -606,4 +609,5 @@ get_tool_class = lambda: HelpGuideTool
 # Standalone testing
 if __name__ == "__main__":
     from modules.core_components.tools import run_tool_standalone
+
     run_tool_standalone(HelpGuideTool, port=7869, title="Help Guide - Standalone")

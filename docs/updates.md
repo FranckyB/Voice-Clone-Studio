@@ -4,6 +4,7 @@
 ## February 7, 2026
 
 #### Version 1.0.0 - Complete Modular Rewrite
+- **LuxTTS Voice Clone Engine** - Added LuxTTS as a third voice cloning engine with 48 kHz output, caching, and UI controls
 - **Full Modular Architecture** - Complete rewrite from a 6000+ line monolith into independent tool modules under `modules/core_components/tools/`
 - **Tool System** - Each tab is now a self-contained tool with its own UI, events, and logic, loaded dynamically from a central registry
 - **Enable/Disable Tools** - New "Visible Tools" section in Settings lets you toggle any tab on or off (persisted in config, takes effect on restart)

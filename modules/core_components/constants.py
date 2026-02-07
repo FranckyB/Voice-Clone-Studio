@@ -47,7 +47,11 @@ MODEL_SIZES = ["Small", "Large"]  # Small=0.6B, Large=1.7B
 MODEL_SIZES_BASE = ["Small", "Large"]  # Base model: Small=0.6B, Large=1.7B
 MODEL_SIZES_CUSTOM = ["Small", "Large"]  # CustomVoice: Small=0.6B, Large=1.7B
 MODEL_SIZES_DESIGN = ["1.7B"]  # VoiceDesign only has 1.7B
-MODEL_SIZES_VIBEVOICE = ["Small", "Large (4-bit)", "Large"]  # VibeVoice: 1.5B, 7B-4bit, 7B
+MODEL_SIZES_VIBEVOICE = [
+    "Small",
+    "Large (4-bit)",
+    "Large",
+]  # VibeVoice: 1.5B, 7B-4bit, 7B
 
 # Voice Clone engine and model options
 VOICE_CLONE_OPTIONS = [
@@ -55,7 +59,8 @@ VOICE_CLONE_OPTIONS = [
     "Qwen3 - Large",
     "VibeVoice - Small",
     "VibeVoice - Large (4-bit)",
-    "VibeVoice - Large"
+    "VibeVoice - Large",
+    "LuxTTS - Default",
 ]
 
 # Default to Large models for better quality
@@ -76,7 +81,7 @@ LANGUAGES = [
     "Russian",
     "Portuguese",
     "Spanish",
-    "Italian"
+    "Italian",
 ]
 
 # ============================================================================
@@ -84,15 +89,15 @@ LANGUAGES = [
 # ============================================================================
 
 CUSTOM_VOICE_SPEAKERS = [
-    "Vivian",        # Bright young female (Chinese)
-    "Serena",        # Warm gentle female (Chinese)
-    "Uncle_Fu",      # Seasoned mellow male (Chinese)
-    "Dylan",         # Youthful Beijing male (Chinese)
-    "Eric",          # Lively Chengdu male (Chinese)
-    "Ryan",          # Dynamic male (English)
-    "Aiden",         # Sunny American male (English)
-    "Ono_Anna",      # Playful female (Japanese)
-    "Sohee"          # Warm female (Korean)
+    "Vivian",  # Bright young female (Chinese)
+    "Serena",  # Warm gentle female (Chinese)
+    "Uncle_Fu",  # Seasoned mellow male (Chinese)
+    "Dylan",  # Youthful Beijing male (Chinese)
+    "Eric",  # Lively Chengdu male (Chinese)
+    "Ryan",  # Dynamic male (English)
+    "Aiden",  # Sunny American male (English)
+    "Ono_Anna",  # Playful female (Japanese)
+    "Sohee",  # Warm female (Korean)
 ]
 
 # ============================================================================
@@ -114,7 +119,7 @@ SUPPORTED_MODELS = {
     "vibevoice-tts-4b",
     "vibevoice-asr",
     # Whisper models
-    "whisper"
+    "whisper",
 }
 
 # ============================================================================
@@ -152,7 +157,15 @@ DEFAULT_CONFIG = {
     "temp_folder": "temp",
     "models_folder": "models",
     "trained_models_folder": "models",
-    "emotions": None  # Initialized separately
+    "emotions": None,  # Initialized separately
+    "luxtts_num_steps": 4,
+    "luxtts_t_shift": 0.9,
+    "luxtts_speed": 1.0,
+    "luxtts_return_smooth": False,
+    "luxtts_rms": 0.01,
+    "luxtts_ref_duration": 5.0,
+    "luxtts_device": "auto",
+    "luxtts_threads": 2,
 }
 
 # ============================================================================
@@ -166,7 +179,7 @@ QWEN_GENERATION_DEFAULTS = {
     "top_k": 50,
     "top_p": 1.0,
     "repetition_penalty": 1.05,
-    "max_new_tokens": 2048
+    "max_new_tokens": 2048,
 }
 
 # VibeVoice TTS Generation Defaults
@@ -177,7 +190,19 @@ VIBEVOICE_GENERATION_DEFAULTS = {
     "top_p": 1.0,
     "repetition_penalty": 1.0,
     "cfg_scale": 3.0,
-    "num_steps": 20
+    "num_steps": 20,
+}
+
+# LuxTTS Generation Defaults
+LUXTTS_DEFAULTS = {
+    "num_steps": 4,
+    "t_shift": 0.9,
+    "speed": 1.0,
+    "return_smooth": False,
+    "rms": 0.01,
+    "ref_duration": 5.0,
+    "device": "auto",
+    "threads": 2,
 }
 
 # ============================================================================
@@ -185,7 +210,7 @@ VIBEVOICE_GENERATION_DEFAULTS = {
 # ============================================================================
 
 APP_TITLE = "Voice Clone Studio"
-APP_SUBTITLE = "Powered by Qwen3-TTS, VibeVoice and Whisper"
+APP_SUBTITLE = "Powered by Qwen3-TTS, VibeVoice, LuxTTS and Whisper"
 
 # Port assignments for standalone tool testing
 TOOL_PORTS = {

@@ -8,7 +8,7 @@ from .ui_components import (
     INPUT_MODAL_CSS,
     INPUT_MODAL_HEAD,
     INPUT_MODAL_HTML,
-    show_input_modal_js
+    show_input_modal_js,
 )
 
 from .emotion_manager import (
@@ -17,7 +17,7 @@ from .emotion_manager import (
     get_emotion_choices,
     calculate_emotion_values,
     handle_save_emotion,
-    handle_delete_emotion
+    handle_delete_emotion,
 )
 
 from .constants import (
@@ -35,6 +35,7 @@ from .constants import (
     DEFAULT_CONFIG,
     QWEN_GENERATION_DEFAULTS,
     VIBEVOICE_GENERATION_DEFAULTS,
+    LUXTTS_DEFAULTS,
 )
 
 __all__ = [
@@ -70,4 +71,5 @@ __all__ = [
     "DEFAULT_CONFIG",
     "QWEN_GENERATION_DEFAULTS",
     "VIBEVOICE_GENERATION_DEFAULTS",
+    "LUXTTS_DEFAULTS",
 ]

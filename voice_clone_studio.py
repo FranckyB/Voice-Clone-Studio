@@ -37,7 +37,7 @@ from modules.core_components import (
     get_emotion_choices,
     calculate_emotion_values,
     handle_save_emotion,
-    handle_delete_emotion
+    handle_delete_emotion,
 )
 
 # UI components
@@ -45,14 +45,11 @@ from modules.core_components.ui_components import (
     create_qwen_advanced_params,
     create_vibevoice_advanced_params,
     create_emotion_intensity_slider,
-    create_pause_controls
+    create_pause_controls,
 )
 
 # AI Managers
-from modules.core_components.ai_models import (
-    get_tts_manager,
-    get_asr_manager
-)
+from modules.core_components.ai_models import get_tts_manager, get_asr_manager
 from modules.core_components.ai_models.model_utils import get_trained_models
 
 # Modular tools
@@ -65,7 +62,7 @@ from modules.core_components.tools import (
     play_completion_beep,
     format_help_html,
     TRIGGER_HIDE_CSS,
-    CONFIG_FILE
+    CONFIG_FILE,
 )
 
 # Add modules to path
@@ -80,8 +77,8 @@ _user_config = load_config()
 _active_emotions = load_emotions_from_config(_user_config)
 
 # Ensure config has emotions key set (emotion_manager expects it)
-if 'emotions' not in _user_config or _user_config['emotions'] is None:
-    _user_config['emotions'] = _active_emotions
+if "emotions" not in _user_config or _user_config["emotions"] is None:
+    _user_config["emotions"] = _active_emotions
 
 # Initialize directories
 SAMPLES_DIR = Path(__file__).parent / _user_config.get("samples_folder", "samples")
@@ -105,6 +102,7 @@ from modules.core_components.constants import (
     MODEL_SIZES_VIBEVOICE,
     VOICE_CLONE_OPTIONS,
     DEFAULT_VOICE_CLONE_MODEL,
+    LUXTTS_DEFAULTS,
     LANGUAGES,
     CUSTOM_VOICE_SPEAKERS,
     SUPPORTED_MODELS,
@@ -124,6 +122,7 @@ _asr_manager = None
 # UI CREATION
 # ============================================================================
 
+
 def create_ui():
     """Create the Gradio interface with modular tools."""
 
@@ -141,15 +140,19 @@ def create_ui():
         gr.HTML(INPUT_MODAL_HTML)
 
         # Hidden triggers for modals
-        confirm_trigger = gr.Textbox(label="Confirm Trigger", value="", elem_id="confirm-trigger")
-        input_trigger = gr.Textbox(label="Input Trigger", value="", elem_id="input-trigger")
+        confirm_trigger = gr.Textbox(
+            label="Confirm Trigger", value="", elem_id="confirm-trigger"
+        )
+        input_trigger = gr.Textbox(
+            label="Input Trigger", value="", elem_id="input-trigger"
+        )
 
         # Header with unload button
         with gr.Row():
             with gr.Column(scale=20):
                 gr.Markdown("""
                     # 🎙️ Voice Clone Studio
-                    <p style="font-size: 0.9em; color: #ffffff; margin-top: -10px;">Powered by Qwen3-TTS, VibeVoice and Whisper</p>
+                    <p style="font-size: 0.9em; color: #ffffff; margin-top: -10px;">Powered by Qwen3-TTS, VibeVoice, LuxTTS and Whisper</p>
                     """)
 
             with gr.Column(scale=1, min_width=180):
@@ -163,28 +166,26 @@ def create_ui():
             user_config=_user_config,
             active_emotions=_active_emotions,
             directories={
-                'OUTPUT_DIR': OUTPUT_DIR,
-                'SAMPLES_DIR': SAMPLES_DIR,
-                'DATASETS_DIR': DATASETS_DIR,
-                'TEMP_DIR': TEMP_DIR
+                "OUTPUT_DIR": OUTPUT_DIR,
+                "SAMPLES_DIR": SAMPLES_DIR,
+                "DATASETS_DIR": DATASETS_DIR,
+                "TEMP_DIR": TEMP_DIR,
             },
             constants={
-                'MODEL_SIZES': MODEL_SIZES,
-                'MODEL_SIZES_BASE': MODEL_SIZES_BASE,
-                'MODEL_SIZES_CUSTOM': MODEL_SIZES_CUSTOM,
-                'MODEL_SIZES_DESIGN': MODEL_SIZES_DESIGN,
-                'MODEL_SIZES_VIBEVOICE': MODEL_SIZES_VIBEVOICE,
-                'VOICE_CLONE_OPTIONS': VOICE_CLONE_OPTIONS,
-                'DEFAULT_VOICE_CLONE_MODEL': DEFAULT_VOICE_CLONE_MODEL,
-                'LANGUAGES': LANGUAGES,
-                'CUSTOM_VOICE_SPEAKERS': CUSTOM_VOICE_SPEAKERS,
+                "MODEL_SIZES": MODEL_SIZES,
+                "MODEL_SIZES_BASE": MODEL_SIZES_BASE,
+                "MODEL_SIZES_CUSTOM": MODEL_SIZES_CUSTOM,
+                "MODEL_SIZES_DESIGN": MODEL_SIZES_DESIGN,
+                "MODEL_SIZES_VIBEVOICE": MODEL_SIZES_VIBEVOICE,
+                "VOICE_CLONE_OPTIONS": VOICE_CLONE_OPTIONS,
+                "DEFAULT_VOICE_CLONE_MODEL": DEFAULT_VOICE_CLONE_MODEL,
+                "LUXTTS_DEFAULTS": LUXTTS_DEFAULTS,
+                "LANGUAGES": LANGUAGES,
+                "CUSTOM_VOICE_SPEAKERS": CUSTOM_VOICE_SPEAKERS,
             },
-            managers={
-                'tts_manager': _tts_manager,
-                'asr_manager': _asr_manager
-            },
+            managers={"tts_manager": _tts_manager, "asr_manager": _asr_manager},
             confirm_trigger=confirm_trigger,
-            input_trigger=input_trigger
+            input_trigger=input_trigger,
         )
 
         # ============================================================
@@ -205,21 +206,15 @@ def create_ui():
             time.sleep(3)
             return " "
 
-        unload_all_btn.click(
-            on_unload_all,
-            outputs=[unload_status]
-        ).then(
-            fn=clear_status,
-            inputs=[],
-            outputs=[unload_status],
-            show_progress="hidden"
+        unload_all_btn.click(on_unload_all, outputs=[unload_status]).then(
+            fn=clear_status, inputs=[], outputs=[unload_status], show_progress="hidden"
         )
 
     return app
 
 
 if __name__ == "__main__":
-    theme = gr.themes.Base.load('modules/core_components/ui_components/theme.json')
+    theme = gr.themes.Base.load("modules/core_components/ui_components/theme.json")
     app = create_ui()
     app.launch(
         server_name=os.getenv("GRADIO_SERVER_NAME", "127.0.0.1"),
@@ -228,5 +223,5 @@ if __name__ == "__main__":
         inbrowser=True,
         theme=theme,
         css=TRIGGER_HIDE_CSS + CONFIRMATION_MODAL_CSS + INPUT_MODAL_CSS,
-        head=CONFIRMATION_MODAL_HEAD + INPUT_MODAL_HEAD
+        head=CONFIRMATION_MODAL_HEAD + INPUT_MODAL_HEAD,
     )

@@ -26,14 +26,14 @@ from modules.core_components.tools import settings
 # Registry of available tools
 # Format: 'tool_name': (module, ToolConfig)
 ALL_TOOLS = {
-    'voice_clone': (voice_clone, voice_clone.VoiceCloneTool.config),
-    'voice_presets': (voice_presets, voice_presets.VoicePresetsTool.config),
-    'conversation': (conversation, conversation.ConversationTool.config),
-    'voice_design': (voice_design, voice_design.VoiceDesignTool.config),
-    'prep_audio': (prep_audio, prep_audio.PrepSamplesTool.config),
-    'train_model': (train_model, train_model.TrainModelTool.config),
-    'output_history': (output_history, output_history.OutputHistoryTool.config),
-    'settings': (settings, settings.SettingsTool.config),
+    "voice_clone": (voice_clone, voice_clone.VoiceCloneTool.config),
+    "voice_presets": (voice_presets, voice_presets.VoicePresetsTool.config),
+    "conversation": (conversation, conversation.ConversationTool.config),
+    "voice_design": (voice_design, voice_design.VoiceDesignTool.config),
+    "prep_audio": (prep_audio, prep_audio.PrepSamplesTool.config),
+    "train_model": (train_model, train_model.TrainModelTool.config),
+    "output_history": (output_history, output_history.OutputHistoryTool.config),
+    "settings": (settings, settings.SettingsTool.config),
 }
 
 
@@ -89,21 +89,25 @@ def create_enabled_tools(shared_state):
     Returns:
         Dict mapping tool name to component references
     """
-    user_config = shared_state.get('user_config', {})
+    user_config = shared_state.get("user_config", {})
     enabled_tools = get_enabled_tools(user_config)
 
     tool_components = {}
     for tool_module, config in enabled_tools:
         try:
             # Create tool UI - use get_tool_class if available
-            if hasattr(tool_module, 'get_tool_class'):
+            if hasattr(tool_module, "get_tool_class"):
                 tool_class = tool_module.get_tool_class()
             else:
                 # Fallback: find first Tool subclass
                 tool_class = None
                 for attr_name in dir(tool_module):
                     attr = getattr(tool_module, attr_name)
-                    if isinstance(attr, type) and issubclass(attr, Tool) and attr is not Tool:
+                    if (
+                        isinstance(attr, type)
+                        and issubclass(attr, Tool)
+                        and attr is not Tool
+                    ):
                         tool_class = attr
                         break
                 if not tool_class:
@@ -111,10 +115,10 @@ def create_enabled_tools(shared_state):
 
             components = tool_class.create_tool(shared_state)
             tool_components[config.name] = {
-                'module': tool_module,
-                'config': config,
-                'components': components,
-                'tool_class': tool_class
+                "module": tool_module,
+                "config": config,
+                "components": components,
+                "tool_class": tool_class,
             }
         except Exception as e:
             print(f"Warning: Failed to create tool '{config.name}': {e}")
@@ -132,8 +136,8 @@ def setup_tool_events(tool_components, shared_state):
     """
     for tool_name, tool_info in tool_components.items():
         try:
-            tool_class = tool_info['tool_class']
-            components = tool_info['components']
+            tool_class = tool_info["tool_class"]
+            components = tool_info["components"]
 
             # Setup events
             tool_class.setup_events(components, shared_state)
@@ -143,38 +147,40 @@ def setup_tool_events(tool_components, shared_state):
 
 # Add this to modules so it can be accessed
 __all__ = [
-    'ALL_TOOLS',
-    'get_tool_registry',
-    'get_enabled_tools',
-    'save_tool_settings',
-    'create_enabled_tools',
-    'setup_tool_events',
-    'PROJECT_ROOT',
-    'CONFIG_FILE',
-    'get_configured_dir',
-    'load_config',
-    'save_config',
-    'save_preference',
-    'format_help_html',
-    'play_completion_beep',
-    'get_sample_choices',
-    'strip_sample_extension',
-    'get_available_samples',
-    'get_prompt_cache_path',
-    'load_sample_details',
-    'get_dataset_folders',
-    'get_dataset_files',
-    'get_or_create_voice_prompt_standalone',
-    'build_shared_state',
-    'run_tool_standalone',
-    'SHARED_CSS',
-    'TRIGGER_HIDE_CSS',
+    "ALL_TOOLS",
+    "get_tool_registry",
+    "get_enabled_tools",
+    "save_tool_settings",
+    "create_enabled_tools",
+    "setup_tool_events",
+    "PROJECT_ROOT",
+    "CONFIG_FILE",
+    "get_configured_dir",
+    "load_config",
+    "save_config",
+    "save_preference",
+    "format_help_html",
+    "play_completion_beep",
+    "get_sample_choices",
+    "strip_sample_extension",
+    "get_available_samples",
+    "get_prompt_cache_path",
+    "get_luxtts_prompt_cache_files",
+    "load_sample_details",
+    "get_dataset_folders",
+    "get_dataset_files",
+    "get_or_create_voice_prompt_standalone",
+    "build_shared_state",
+    "run_tool_standalone",
+    "SHARED_CSS",
+    "TRIGGER_HIDE_CSS",
 ]
 
 
 # ============================================================================
 # Shared utilities for standalone tool testing
 # ============================================================================
+
 
 # Config file path (relative to project root)
 # Find project root by searching upward for voice_clone_studio.py
@@ -187,6 +193,7 @@ def _find_project_root():
         current = current.parent
     # Fallback to best guess (4 levels up from tools/__init__.py)
     return Path(__file__).parent.parent.parent.parent
+
 
 PROJECT_ROOT = _find_project_root()
 CONFIG_FILE = PROJECT_ROOT / "config.json"
@@ -206,6 +213,7 @@ def get_configured_dir(folder_key, default):
     """
     config = load_config()
     return PROJECT_ROOT / config.get(folder_key, default)
+
 
 # Shared CSS for all tools
 # - Hides trigger widgets used by modal system
@@ -298,19 +306,27 @@ def load_config():
         "conv_pause_period": 0.3,
         "conv_pause_comma": 0.2,
         "conv_pause_question": 0.4,
-        "conv_pause_hyphen": 0.15
+        "conv_pause_hyphen": 0.15,
+        "luxtts_num_steps": 4,
+        "luxtts_t_shift": 0.9,
+        "luxtts_speed": 1.0,
+        "luxtts_return_smooth": False,
+        "luxtts_rms": 0.01,
+        "luxtts_ref_duration": 5.0,
+        "luxtts_device": "auto",
+        "luxtts_threads": 2,
     }
 
     try:
         if CONFIG_FILE.exists():
-            with open(CONFIG_FILE, 'r') as f:
+            with open(CONFIG_FILE, "r") as f:
                 saved_config = json.load(f)
                 # Merge with defaults to handle new settings
                 default_config.update(saved_config)
         else:
             # Create config file with defaults if it doesn't exist
             CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
-            with open(CONFIG_FILE, 'w') as f:
+            with open(CONFIG_FILE, "w") as f:
                 json.dump(default_config, f, indent=2)
             print(f"Created new config file: {CONFIG_FILE}")
     except Exception as e:
@@ -319,11 +335,14 @@ def load_config():
     # Initialize emotions if not present (first launch or corrupted config)
     if not default_config.get("emotions"):
         from modules.core_components import CORE_EMOTIONS
+
         # Sort alphabetically (case-insensitive)
-        default_config["emotions"] = dict(sorted(CORE_EMOTIONS.items(), key=lambda x: x[0].lower()))
+        default_config["emotions"] = dict(
+            sorted(CORE_EMOTIONS.items(), key=lambda x: x[0].lower())
+        )
         # Save config with emotions
         try:
-            with open(CONFIG_FILE, 'w') as f:
+            with open(CONFIG_FILE, "w") as f:
                 json.dump(default_config, f, indent=2)
             print("Initialized emotions in config")
         except Exception as e:
@@ -346,7 +365,7 @@ def save_config(config, key=None, value=None):
         config[key] = value
 
     try:
-        with open(CONFIG_FILE, 'w') as f:
+        with open(CONFIG_FILE, "w") as f:
             json.dump(config, f, indent=2)
     except Exception as e:
         print(f"Warning: Could not save config: {e}")
@@ -360,8 +379,7 @@ def format_help_html(markdown_text, height="70vh"):
         height: CSS height value (default: "70vh")
     """
     html_content = markdown.markdown(
-        markdown_text,
-        extensions=['fenced_code', 'tables', 'nl2br']
+        markdown_text, extensions=["fenced_code", "tables", "nl2br"]
     )
     return f"""
     <div style="
@@ -377,6 +395,7 @@ def format_help_html(markdown_text, height="70vh"):
         {html_content}
     </div>
     """
+
 
 # Audio notification helper
 def play_completion_beep():
@@ -399,19 +418,34 @@ def play_completion_beep():
                 if platform.system() == "Windows":
                     # Windows: Use winsound.PlaySound with audio file (synchronous to ensure it plays)
                     import winsound
+
                     winsound.PlaySound(str(notification_path), winsound.SND_FILENAME)
                 elif platform.system() == "Darwin":
                     # macOS: Use afplay
                     import subprocess
-                    subprocess.Popen(["afplay", str(notification_path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+                    subprocess.Popen(
+                        ["afplay", str(notification_path)],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
                 else:
                     # Linux: Try aplay (ALSA), fallback to paplay (PulseAudio), fail silently if neither exists
                     import subprocess
+
                     try:
-                        subprocess.Popen(["aplay", "-q", str(notification_path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        subprocess.Popen(
+                            ["aplay", "-q", str(notification_path)],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                        )
                     except FileNotFoundError:
                         try:
-                            subprocess.Popen(["paplay", str(notification_path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                            subprocess.Popen(
+                                ["paplay", str(notification_path)],
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                            )
                         except FileNotFoundError:
                             pass  # No audio player available, fail silently
             except Exception:
@@ -419,7 +453,7 @@ def play_completion_beep():
                 pass
         else:
             # Notification file missing, use ASCII bell
-            print('\a', end='', flush=True)
+            print("\a", end="", flush=True)
     except Exception as outer_e:
         # Final fallback - at least print the message
         try:
@@ -431,6 +465,7 @@ def play_completion_beep():
 
 # ===== Sample Management Helpers (Voice Clone & related tools) =====
 
+
 def get_sample_choices():
     """Get list of sample names for FileLister/dropdown.
 
@@ -439,6 +474,7 @@ def get_sample_choices():
     Use strip_sample_extension() to get the bare name for lookups.
     """
     import json
+
     SAMPLES_DIR = get_configured_dir("samples_folder", "samples")
 
     samples = []
@@ -447,7 +483,7 @@ def get_sample_choices():
         name = wav_file.stem
         if json_file.exists():
             try:
-                with open(json_file, 'r', encoding='utf-8') as f:
+                with open(json_file, "r", encoding="utf-8") as f:
                     meta = json.load(f)
                     name = meta.get("name", wav_file.stem)
             except:
@@ -465,6 +501,7 @@ def strip_sample_extension(name):
         return name[:-4]
     return name
 
+
 def get_available_samples():
     """Get full sample data (wav path, text, metadata).
 
@@ -472,6 +509,7 @@ def get_available_samples():
     Samples without .json are still included with empty ref_text.
     """
     import json
+
     SAMPLES_DIR = get_configured_dir("samples_folder", "samples")
 
     samples = []
@@ -482,24 +520,35 @@ def get_available_samples():
         ref_text = ""
         if json_file.exists():
             try:
-                with open(json_file, 'r', encoding='utf-8') as f:
+                with open(json_file, "r", encoding="utf-8") as f:
                     meta = json.load(f)
                 name = meta.get("name", wav_file.stem)
                 ref_text = meta.get("Text", meta.get("text", ""))
             except:
                 pass
-        samples.append({
-            "name": name,
-            "wav_path": str(wav_file),
-            "ref_text": ref_text,
-            "meta": meta
-        })
+        samples.append(
+            {
+                "name": name,
+                "wav_path": str(wav_file),
+                "ref_text": ref_text,
+                "meta": meta,
+            }
+        )
     return samples
+
 
 def get_prompt_cache_path(sample_name, model_size):
     """Get cache path for voice prompt."""
     samples_folder = get_configured_dir("samples_folder", "samples")
     return samples_folder / f"{sample_name}_{model_size}.pt"
+
+
+def get_luxtts_prompt_cache_files(sample_name):
+    """Get LuxTTS prompt cache files for a sample."""
+    samples_folder = get_configured_dir("samples_folder", "samples")
+    pattern = f"{sample_name}_luxtts_*.prompt"
+    return list(samples_folder.glob(pattern))
+
 
 def load_sample_details(sample_name):
     """
@@ -512,6 +561,7 @@ def load_sample_details(sample_name):
         return None, "", ""
 
     import soundfile as sf
+
     samples = get_available_samples()
 
     for s in samples:
@@ -519,22 +569,29 @@ def load_sample_details(sample_name):
             # Check cache status for both model sizes
             cache_small = get_prompt_cache_path(sample_name, "0.6B").exists()
             cache_large = get_prompt_cache_path(sample_name, "1.7B").exists()
+            lux_cache_files = get_luxtts_prompt_cache_files(sample_name)
+            lux_cached = bool(lux_cache_files)
 
             if cache_small and cache_large:
-                cache_status = "Qwen Cache: ⚡ Small, Large"
+                qwen_status = "Qwen Cache: ⚡ Small, Large"
             elif cache_small:
-                cache_status = "Qwen Cache: ⚡ Small"
+                qwen_status = "Qwen Cache: ⚡ Small"
             elif cache_large:
-                cache_status = "Qwen Cache: ⚡ Large"
+                qwen_status = "Qwen Cache: ⚡ Large"
             else:
-                cache_status = "Qwen Cache: 📦 Not cached"
+                qwen_status = "Qwen Cache: 📦 Not cached"
+
+            if lux_cached:
+                lux_status = f"LuxTTS Cache: ⚡ {len(lux_cache_files)} file(s)"
+            else:
+                lux_status = "LuxTTS Cache: 📦 Not cached"
 
             try:
                 audio_data, sr = sf.read(s["wav_path"])
                 duration = len(audio_data) / sr
-                info = f"**Info**\n\nDuration: {duration:.2f}s | {cache_status}"
+                info = f"**Info**\n\nDuration: {duration:.2f}s | {qwen_status} | {lux_status}"
             except:
-                info = f"**Info**\n\n{cache_status}"
+                info = f"**Info**\n\n{qwen_status} | {lux_status}"
 
             # Add design instructions if this was a Voice Design sample
             meta = s.get("meta", {})
@@ -547,6 +604,7 @@ def load_sample_details(sample_name):
 
 
 # ===== Dataset Management Helpers (Prep Dataset & Train Model tools) =====
+
 
 def get_dataset_folders():
     """Get list of subfolders in datasets directory."""
@@ -574,12 +632,14 @@ def get_dataset_files(folder=None):
     audio_files = sorted(
         list(scan_dir.glob("*.wav")) + list(scan_dir.glob("*.mp3")),
         key=lambda x: x.stat().st_mtime,
-        reverse=True
+        reverse=True,
     )
     return [f.name for f in audio_files]
 
 
-def get_or_create_voice_prompt_standalone(model, sample_name, wav_path, ref_text, model_size, progress_callback=None):
+def get_or_create_voice_prompt_standalone(
+    model, sample_name, wav_path, ref_text, model_size, progress_callback=None
+):
     """
     Get cached voice prompt or create new one using tts_manager.
 
@@ -619,7 +679,15 @@ def get_or_create_voice_prompt_standalone(model, sample_name, wav_path, ref_text
     return prompt_items, False  # False = newly created
 
 
-def build_shared_state(user_config, active_emotions, directories, constants, managers=None, confirm_trigger=None, input_trigger=None):
+def build_shared_state(
+    user_config,
+    active_emotions,
+    directories,
+    constants,
+    managers=None,
+    confirm_trigger=None,
+    input_trigger=None,
+):
     """
     Build shared_state dictionary for main app or standalone testing.
 
@@ -643,19 +711,19 @@ def build_shared_state(user_config, active_emotions, directories, constants, man
         get_emotion_choices,
         calculate_emotion_values,
         handle_save_emotion,
-        handle_delete_emotion
+        handle_delete_emotion,
     )
     from modules.core_components.ui_components import (
         create_qwen_advanced_params,
         create_vibevoice_advanced_params,
         create_emotion_intensity_slider,
-        create_pause_controls
+        create_pause_controls,
     )
     from modules.core_components.ai_models.model_utils import (
         get_trained_models as get_trained_models_util,
         get_trained_model_names as get_trained_model_names_util,
         train_model as train_model_util,
-        download_model_from_huggingface as download_model_util
+        download_model_from_huggingface as download_model_util,
     )
 
     # Import audio utilities BEFORE building shared_state
@@ -669,12 +737,13 @@ def build_shared_state(user_config, active_emotions, directories, constants, man
         convert_to_mono as convert_to_mono_util,
         save_audio_as_sample as save_as_sample_util,
         clean_audio as clean_audio_util,
-        check_audio_format as check_audio_format_util
+        check_audio_format as check_audio_format_util,
     )
 
     # Check optional dependencies
     try:
         import whisper
+
         WHISPER_AVAILABLE = True
     except ImportError:
         WHISPER_AVAILABLE = False
@@ -682,19 +751,25 @@ def build_shared_state(user_config, active_emotions, directories, constants, man
     # DeepFilterNet / Torchaudio Compatibility Shim
     try:
         from modules.deepfilternet import deepfilternet_torchaudio_patch
+
         deepfilternet_torchaudio_patch.apply_patches()
     except ImportError:
-        print("Warning: compatibility_patches module not found. DeepFilterNet may fail to load.")
+        print(
+            "Warning: compatibility_patches module not found. DeepFilterNet may fail to load."
+        )
 
     # Try importing DeepFilterNet
     try:
         from df.enhance import enhance, init_df, load_audio, save_audio
         from df.io import load_audio as df_load_audio
+
         DEEPFILTER_AVAILABLE = True
     except ImportError as e:
         # If it still fails with the specific backend error, print guidance
         if "torchaudio.backend" in str(e):
-            print(f"⚠ DeepFilterNet failed to load due to torchaudio incompatibility: {e}")
+            print(
+                f"⚠ DeepFilterNet failed to load due to torchaudio incompatibility: {e}"
+            )
         else:
             print(f"⚠ DeepFilterNet not available: {e}")
         DEEPFILTER_AVAILABLE = False
@@ -713,7 +788,7 @@ def build_shared_state(user_config, active_emotions, directories, constants, man
             from df.enhance import init_df
 
             # Cache the model (simple module-level caching)
-            if not hasattr(get_deepfilter_lazy, '_model_cache'):
+            if not hasattr(get_deepfilter_lazy, "_model_cache"):
                 print("Loading DeepFilterNet model...")
                 res = init_df()
                 if isinstance(res, tuple):
@@ -725,113 +800,158 @@ def build_shared_state(user_config, active_emotions, directories, constants, man
             return get_deepfilter_lazy._model_cache
 
         # Use the real clean_audio function with lazy model loader
-        return clean_audio_util(audio_file, directories.get('TEMP_DIR'), get_deepfilter_lazy, progress)
+        return clean_audio_util(
+            audio_file, directories.get("TEMP_DIR"), get_deepfilter_lazy, progress
+        )
 
     shared_state = {
         # Config & Emotions
-        'user_config': user_config,
-        '_user_config': user_config,
-        '_active_emotions': active_emotions,
-
+        "user_config": user_config,
+        "_user_config": user_config,
+        "_active_emotions": active_emotions,
         # Directories
-        'OUTPUT_DIR': directories.get('OUTPUT_DIR'),
-        'SAMPLES_DIR': directories.get('SAMPLES_DIR'),
-        'DATASETS_DIR': directories.get('DATASETS_DIR'),
-        'TEMP_DIR': directories.get('TEMP_DIR'),
-
+        "OUTPUT_DIR": directories.get("OUTPUT_DIR"),
+        "SAMPLES_DIR": directories.get("SAMPLES_DIR"),
+        "DATASETS_DIR": directories.get("DATASETS_DIR"),
+        "TEMP_DIR": directories.get("TEMP_DIR"),
         # Constants
-        'LANGUAGES': constants.get('LANGUAGES', []),
-        'CUSTOM_VOICE_SPEAKERS': constants.get('CUSTOM_VOICE_SPEAKERS', []),
-        'MODEL_SIZES': constants.get('MODEL_SIZES'),
-        'MODEL_SIZES_BASE': constants.get('MODEL_SIZES_BASE'),
-        'MODEL_SIZES_CUSTOM': constants.get('MODEL_SIZES_CUSTOM'),
-        'MODEL_SIZES_DESIGN': constants.get('MODEL_SIZES_DESIGN'),
-        'MODEL_SIZES_VIBEVOICE': constants.get('MODEL_SIZES_VIBEVOICE'),
-        'VOICE_CLONE_OPTIONS': constants.get('VOICE_CLONE_OPTIONS'),
-        'DEFAULT_VOICE_CLONE_MODEL': constants.get('DEFAULT_VOICE_CLONE_MODEL'),
-        'WHISPER_AVAILABLE': WHISPER_AVAILABLE,
-        'DEEPFILTER_AVAILABLE': DEEPFILTER_AVAILABLE,
-
+        "LANGUAGES": constants.get("LANGUAGES", []),
+        "CUSTOM_VOICE_SPEAKERS": constants.get("CUSTOM_VOICE_SPEAKERS", []),
+        "MODEL_SIZES": constants.get("MODEL_SIZES"),
+        "MODEL_SIZES_BASE": constants.get("MODEL_SIZES_BASE"),
+        "MODEL_SIZES_CUSTOM": constants.get("MODEL_SIZES_CUSTOM"),
+        "MODEL_SIZES_DESIGN": constants.get("MODEL_SIZES_DESIGN"),
+        "MODEL_SIZES_VIBEVOICE": constants.get("MODEL_SIZES_VIBEVOICE"),
+        "VOICE_CLONE_OPTIONS": constants.get("VOICE_CLONE_OPTIONS"),
+        "DEFAULT_VOICE_CLONE_MODEL": constants.get("DEFAULT_VOICE_CLONE_MODEL"),
+        "LUXTTS_DEFAULTS": constants.get("LUXTTS_DEFAULTS", {}),
+        "WHISPER_AVAILABLE": WHISPER_AVAILABLE,
+        "DEEPFILTER_AVAILABLE": DEEPFILTER_AVAILABLE,
         # UI component creators
-        'create_qwen_advanced_params': create_qwen_advanced_params,
-        'create_vibevoice_advanced_params': create_vibevoice_advanced_params,
-        'create_emotion_intensity_slider': create_emotion_intensity_slider,
-        'create_pause_controls': create_pause_controls,
-
+        "create_qwen_advanced_params": create_qwen_advanced_params,
+        "create_vibevoice_advanced_params": create_vibevoice_advanced_params,
+        "create_emotion_intensity_slider": create_emotion_intensity_slider,
+        "create_pause_controls": create_pause_controls,
         # Emotion management
-        'get_emotion_choices': get_emotion_choices,
-
+        "get_emotion_choices": get_emotion_choices,
         # Core utilities
-        'play_completion_beep': play_completion_beep,
-        'format_help_html': format_help_html,
-
+        "play_completion_beep": play_completion_beep,
+        "format_help_html": format_help_html,
         # Modal triggers and helpers
-        'confirm_trigger': confirm_trigger,
-        'input_trigger': input_trigger,
-        'show_confirmation_modal_js': show_confirmation_modal_js,
-        'show_input_modal_js': show_input_modal_js,
-
+        "confirm_trigger": confirm_trigger,
+        "input_trigger": input_trigger,
+        "show_confirmation_modal_js": show_confirmation_modal_js,
+        "show_input_modal_js": show_input_modal_js,
         # Helper functions
-        'get_trained_models': lambda: get_trained_models_util(directories.get('OUTPUT_DIR').parent / user_config.get("models_folder", "models")),
-        'get_trained_model_names': lambda: get_trained_model_names_util(
-            directories.get('OUTPUT_DIR').parent / user_config.get("trained_models_folder", "models")
+        "get_trained_models": lambda: get_trained_models_util(
+            directories.get("OUTPUT_DIR").parent
+            / user_config.get("models_folder", "models")
         ),
-        'train_model': lambda folder, speaker_name, ref_audio, batch_size, lr, epochs, save_interval, progress=None: train_model_util(
-            folder, speaker_name, ref_audio, batch_size, lr, epochs, save_interval,
-            user_config, directories.get('DATASETS_DIR'),
-            directories.get('OUTPUT_DIR').parent,  # project_root
-            play_completion_beep, progress
+        "get_trained_model_names": lambda: get_trained_model_names_util(
+            directories.get("OUTPUT_DIR").parent
+            / user_config.get("trained_models_folder", "models")
         ),
-
+        "train_model": lambda folder,
+        speaker_name,
+        ref_audio,
+        batch_size,
+        lr,
+        epochs,
+        save_interval,
+        progress=None: train_model_util(
+            folder,
+            speaker_name,
+            ref_audio,
+            batch_size,
+            lr,
+            epochs,
+            save_interval,
+            user_config,
+            directories.get("DATASETS_DIR"),
+            directories.get("OUTPUT_DIR").parent,  # project_root
+            play_completion_beep,
+            progress,
+        ),
         # Dataset management helpers
-        'get_dataset_folders': get_dataset_folders,
-        'get_dataset_files': get_dataset_files,
-
+        "get_dataset_folders": get_dataset_folders,
+        "get_dataset_files": get_dataset_files,
         # Sample management helpers (Voice Clone & related tools)
-        'get_sample_choices': get_sample_choices,
-        'get_available_samples': get_available_samples,
-        'get_prompt_cache_path': get_prompt_cache_path,
-        'load_sample_details': load_sample_details,
-        'get_or_create_voice_prompt': get_or_create_voice_prompt_standalone,  # Default mock for standalone, main app overrides
-        'refresh_samples': lambda: __import__('gradio').update(choices=get_sample_choices()),
-
+        "get_sample_choices": get_sample_choices,
+        "get_available_samples": get_available_samples,
+        "get_prompt_cache_path": get_prompt_cache_path,
+        "get_luxtts_prompt_cache_files": get_luxtts_prompt_cache_files,
+        "load_sample_details": load_sample_details,
+        "get_or_create_voice_prompt": get_or_create_voice_prompt_standalone,  # Default mock for standalone, main app overrides
+        "refresh_samples": lambda: __import__("gradio").update(
+            choices=get_sample_choices()
+        ),
         # Audio utilities (Prep Samples tool) - imported from audio_utils
-        'is_audio_file': is_audio_file_util,
-        'is_video_file': is_video_file_util,
-        'extract_audio_from_video': lambda path: extract_audio_from_video_util(path, directories.get('TEMP_DIR')),
-        'get_audio_duration': get_audio_duration_util,
-        'format_time': format_time_util,
-        'normalize_audio': lambda audio: normalize_audio_util(audio, directories.get('TEMP_DIR')),
-        'convert_to_mono': lambda audio: convert_to_mono_util(audio, directories.get('TEMP_DIR')),
-        'clean_audio': lambda audio, progress=None: clean_audio_standalone(audio, progress),
-        'save_as_sample': lambda audio, text, name: save_as_sample_util(audio, text, name, directories.get('SAMPLES_DIR')),
-
+        "is_audio_file": is_audio_file_util,
+        "is_video_file": is_video_file_util,
+        "extract_audio_from_video": lambda path: extract_audio_from_video_util(
+            path, directories.get("TEMP_DIR")
+        ),
+        "get_audio_duration": get_audio_duration_util,
+        "format_time": format_time_util,
+        "normalize_audio": lambda audio: normalize_audio_util(
+            audio, directories.get("TEMP_DIR")
+        ),
+        "convert_to_mono": lambda audio: convert_to_mono_util(
+            audio, directories.get("TEMP_DIR")
+        ),
+        "clean_audio": lambda audio, progress=None: clean_audio_standalone(
+            audio, progress
+        ),
+        "save_as_sample": lambda audio, text, name: save_as_sample_util(
+            audio, text, name, directories.get("SAMPLES_DIR")
+        ),
         # Model downloading
-        'download_model_from_huggingface': lambda model_id, progress=None: download_model_util(
+        "download_model_from_huggingface": lambda model_id,
+        progress=None: download_model_util(
             model_id,
-            models_dir=directories.get('OUTPUT_DIR').parent / user_config.get("models_folder", "models"),
-            progress=progress
+            models_dir=directories.get("OUTPUT_DIR").parent
+            / user_config.get("models_folder", "models"),
+            progress=progress,
         ),
     }
 
     # Lambdas that reference shared_state (must be added after dict creation)
-    shared_state['save_emotion_handler'] = lambda name, intensity, temp, rep_pen, top_p: handle_save_emotion(
-        shared_state['_active_emotions'], shared_state['_user_config'], CONFIG_FILE, name, intensity, temp, rep_pen, top_p
+    shared_state["save_emotion_handler"] = (
+        lambda name, intensity, temp, rep_pen, top_p: handle_save_emotion(
+            shared_state["_active_emotions"],
+            shared_state["_user_config"],
+            CONFIG_FILE,
+            name,
+            intensity,
+            temp,
+            rep_pen,
+            top_p,
+        )
     )
-    shared_state['delete_emotion_handler'] = lambda confirm_val, emotion_name: handle_delete_emotion(
-        shared_state['_active_emotions'], shared_state['_user_config'], CONFIG_FILE, confirm_val, emotion_name
+    shared_state["delete_emotion_handler"] = (
+        lambda confirm_val, emotion_name: handle_delete_emotion(
+            shared_state["_active_emotions"],
+            shared_state["_user_config"],
+            CONFIG_FILE,
+            confirm_val,
+            emotion_name,
+        )
     )
-    shared_state['save_preference'] = lambda k, v: save_config(shared_state['_user_config'], k, v)
+    shared_state["save_preference"] = lambda k, v: save_config(
+        shared_state["_user_config"], k, v
+    )
 
     # Add managers if provided (for main app)
     if managers:
-        shared_state['tts_manager'] = managers.get('tts_manager')
-        shared_state['asr_manager'] = managers.get('asr_manager')
+        shared_state["tts_manager"] = managers.get("tts_manager")
+        shared_state["asr_manager"] = managers.get("asr_manager")
 
     return shared_state
 
 
-def run_tool_standalone(ToolClass, port=7860, title="Tool - Standalone", extra_shared_state=None):
+def run_tool_standalone(
+    ToolClass, port=7860, title="Tool - Standalone", extra_shared_state=None
+):
     """
     Run a tool in standalone mode for testing.
 
@@ -862,7 +982,7 @@ def run_tool_standalone(ToolClass, port=7860, title="Tool - Standalone", extra_s
         INPUT_MODAL_CSS,
         INPUT_MODAL_HEAD,
         INPUT_MODAL_HTML,
-        load_emotions_from_config
+        load_emotions_from_config,
     )
     from modules.core_components.constants import (
         LANGUAGES,
@@ -871,7 +991,8 @@ def run_tool_standalone(ToolClass, port=7860, title="Tool - Standalone", extra_s
         MODEL_SIZES_BASE,
         MODEL_SIZES_VIBEVOICE,
         VOICE_CLONE_OPTIONS,
-        DEFAULT_VOICE_CLONE_MODEL
+        DEFAULT_VOICE_CLONE_MODEL,
+        LUXTTS_DEFAULTS,
     )
 
     # Find project root
@@ -881,8 +1002,8 @@ def run_tool_standalone(ToolClass, port=7860, title="Tool - Standalone", extra_s
     user_config = load_config()
     active_emotions = load_emotions_from_config(user_config)
 
-    if 'emotions' not in user_config or user_config['emotions'] is None:
-        user_config['emotions'] = active_emotions
+    if "emotions" not in user_config or user_config["emotions"] is None:
+        user_config["emotions"] = active_emotions
 
     # Setup directories
     OUTPUT_DIR = project_root / user_config.get("output_folder", "output")
@@ -906,30 +1027,35 @@ def run_tool_standalone(ToolClass, port=7860, title="Tool - Standalone", extra_s
 
         # Hidden trigger widgets
         with gr.Row():
-            confirm_trigger = gr.Textbox(label="Confirm Trigger", value="", elem_id="confirm-trigger")
-            input_trigger = gr.Textbox(label="Input Trigger", value="", elem_id="input-trigger")
+            confirm_trigger = gr.Textbox(
+                label="Confirm Trigger", value="", elem_id="confirm-trigger"
+            )
+            input_trigger = gr.Textbox(
+                label="Input Trigger", value="", elem_id="input-trigger"
+            )
 
         # Build shared_state using centralized helper
         shared_state = build_shared_state(
             user_config=user_config,
             active_emotions=active_emotions,
             directories={
-                'OUTPUT_DIR': OUTPUT_DIR,
-                'SAMPLES_DIR': SAMPLES_DIR,
-                'DATASETS_DIR': DATASETS_DIR,
-                'TEMP_DIR': TEMP_DIR
+                "OUTPUT_DIR": OUTPUT_DIR,
+                "SAMPLES_DIR": SAMPLES_DIR,
+                "DATASETS_DIR": DATASETS_DIR,
+                "TEMP_DIR": TEMP_DIR,
             },
             constants={
-                'LANGUAGES': LANGUAGES,
-                'CUSTOM_VOICE_SPEAKERS': CUSTOM_VOICE_SPEAKERS,
-                'MODEL_SIZES_CUSTOM': MODEL_SIZES_CUSTOM,
-                'MODEL_SIZES_BASE': MODEL_SIZES_BASE,
-                'MODEL_SIZES_VIBEVOICE': MODEL_SIZES_VIBEVOICE,
-                'VOICE_CLONE_OPTIONS': VOICE_CLONE_OPTIONS,
-                'DEFAULT_VOICE_CLONE_MODEL': DEFAULT_VOICE_CLONE_MODEL
+                "LANGUAGES": LANGUAGES,
+                "CUSTOM_VOICE_SPEAKERS": CUSTOM_VOICE_SPEAKERS,
+                "MODEL_SIZES_CUSTOM": MODEL_SIZES_CUSTOM,
+                "MODEL_SIZES_BASE": MODEL_SIZES_BASE,
+                "MODEL_SIZES_VIBEVOICE": MODEL_SIZES_VIBEVOICE,
+                "VOICE_CLONE_OPTIONS": VOICE_CLONE_OPTIONS,
+                "DEFAULT_VOICE_CLONE_MODEL": DEFAULT_VOICE_CLONE_MODEL,
+                "LUXTTS_DEFAULTS": LUXTTS_DEFAULTS,
             },
             confirm_trigger=confirm_trigger,
-            input_trigger=input_trigger
+            input_trigger=input_trigger,
         )
 
         # Add tool-specific shared_state entries
@@ -942,6 +1068,7 @@ def run_tool_standalone(ToolClass, port=7860, title="Tool - Standalone", extra_s
 
     print(f"[*] Output: {OUTPUT_DIR}")
     from modules.core_components.ai_models.model_utils import get_trained_models
+
     models_dir = project_root / user_config.get("models_folder", "models")
     print(f"[*] Found {len(get_trained_models(models_dir))} trained models")
     print(f"\n✓ {ToolClass.config.name} UI loaded successfully!")
@@ -954,5 +1081,5 @@ def run_tool_standalone(ToolClass, port=7860, title="Tool - Standalone", extra_s
         server_port=port,
         server_name="127.0.0.1",
         inbrowser=False,
-        allowed_paths=[str(SAMPLES_DIR), str(OUTPUT_DIR), str(DATASETS_DIR)]
+        allowed_paths=[str(SAMPLES_DIR), str(OUTPUT_DIR), str(DATASETS_DIR)],
     )

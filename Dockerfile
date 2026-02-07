@@ -71,7 +71,9 @@ RUN pip install --no-cache-dir \
     onnxruntime \
     onnxruntime-gpu==1.23.2 \
     markdown==3.10.1 \
-    einops
+    einops \
+    https://github.com/csukuangfj/piper-phonemize/releases/download/2025.06.23/piper_phonemize-1.3.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl \
+    git+https://github.com/ysharma3501/LinaCodec.git
 
 COPY ./wheel /home/user/app/wheel
 COPY ./requirements.txt /home/user/app/requirements.txt
