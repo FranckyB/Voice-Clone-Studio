@@ -105,8 +105,8 @@ def create_enabled_tools(shared_state):
                     attr = getattr(tool_module, attr_name)
                     if (
                         isinstance(attr, type)
-                        and issubclass(attr, Tool)
-                        and attr is not Tool
+                        and issubclass(attr, Tool)  # F821 Undefined name `Tool`
+                        and attr is not Tool  # F821 Undefined name `Tool`
                     ):
                         tool_class = attr
                         break
