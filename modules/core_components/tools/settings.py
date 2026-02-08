@@ -198,7 +198,19 @@ class SettingsTool(Tool):
                                 )
 
                             with gr.Column():
-                                gr.Markdown("")
+                                gr.Markdown("### LuxTTS Runtime")
+                                components["settings_luxtts_device"] = gr.Dropdown(
+                                    label="LuxTTS Device",
+                                    choices=["auto", "cpu", "cuda"],
+                                    value=_user_config.get("luxtts_device", "auto"),
+                                    info="Auto selects CUDA when available",
+                                )
+                                components["settings_luxtts_threads"] = gr.Number(
+                                    label="LuxTTS CPU Threads",
+                                    value=_user_config.get("luxtts_threads", 2),
+                                    precision=0,
+                                    info="Used only when device is CPU",
+                                )
 
                         gr.Markdown("### Folder Paths")
                         gr.Markdown(
@@ -362,6 +374,18 @@ class SettingsTool(Tool):
         components["settings_audio_notifications"].change(
             lambda x: save_preference("browser_notifications", x),
             inputs=[components["settings_audio_notifications"]],
+            outputs=[],
+        )
+
+        # Save LuxTTS runtime settings
+        components["settings_luxtts_device"].change(
+            lambda x: save_preference("luxtts_device", x),
+            inputs=[components["settings_luxtts_device"]],
+            outputs=[],
+        )
+        components["settings_luxtts_threads"].change(
+            lambda x: save_preference("luxtts_threads", int(x) if x is not None else 0),
+            inputs=[components["settings_luxtts_threads"]],
             outputs=[],
         )
 

@@ -300,6 +300,14 @@ class VoiceCloneTool(Tool):
                         initial_guidance_scale=_user_config.get(
                             "luxtts_guidance_scale", 3.0
                         ),
+                        initial_device=_user_config.get(
+                            "luxtts_device",
+                            LUXTTS_DEFAULTS.get("device", "auto"),
+                        ),
+                        initial_threads=_user_config.get(
+                            "luxtts_threads",
+                            LUXTTS_DEFAULTS.get("threads", 2),
+                        ),
                         visible=is_lux_initial,
                     )
                     components["luxtts_params_accordion"] = luxtts_params.get(
@@ -314,6 +322,8 @@ class VoiceCloneTool(Tool):
                     components["luxtts_guidance_scale"] = luxtts_params[
                         "guidance_scale"
                     ]
+                    components["luxtts_device"] = luxtts_params["device"]
+                    components["luxtts_threads"] = luxtts_params["threads"]
 
                     components["generate_btn"] = gr.Button(
                         "Generate Audio", variant="primary", size="lg"
@@ -798,6 +808,16 @@ class VoiceCloneTool(Tool):
         components["luxtts_num_steps"].change(
             lambda x: save_preference("luxtts_num_steps", int(x)),
             inputs=[components["luxtts_num_steps"]],
+            outputs=[],
+        )
+        components["luxtts_device"].change(
+            lambda x: save_preference("luxtts_device", x),
+            inputs=[components["luxtts_device"]],
+            outputs=[],
+        )
+        components["luxtts_threads"].change(
+            lambda x: save_preference("luxtts_threads", int(x) if x is not None else 0),
+            inputs=[components["luxtts_threads"]],
             outputs=[],
         )
         components["luxtts_t_shift"].change(
