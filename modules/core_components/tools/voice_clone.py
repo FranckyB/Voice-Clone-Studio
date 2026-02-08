@@ -429,11 +429,11 @@ class VoiceCloneTool(Tool):
             if not sample:
                 return None, f"❌ Sample '{sample_name}' not found."
 
-            # Check that sample has a transcript (required for all engines)
+            # Check that sample has a transcript when required (Qwen only)
             sample_ref_text = sample.get("ref_text") or sample.get("meta", {}).get(
                 "Text", ""
             )
-            if not sample_ref_text.strip():
+            if engine == "qwen" and not sample_ref_text.strip():
                 return None, (
                     f"❌ No transcript found for sample '{sample_name}'.\n\n"
                     "Please transcribe this sample first in the **Prep Audio** tab "
@@ -461,7 +461,7 @@ class VoiceCloneTool(Tool):
                         model=model,
                         sample_name=sample_name,
                         wav_path=sample["wav_path"],
-                        ref_text=sample["ref_text"],
+                        ref_text=sample_ref_text,
                         model_size=model_size,
                         progress_callback=progress,
                     )
@@ -527,8 +527,6 @@ class VoiceCloneTool(Tool):
                             ref_duration=int(lux_ref_duration),
                             guidance_scale=float(lux_guidance_scale),
                             seed=seed,
-                            ref_text=sample.get("ref_text")
-                            or sample.get("meta", {}).get("Text"),
                             progress_callback=progress,
                         )
                     )
