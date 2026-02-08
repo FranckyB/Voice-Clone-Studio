@@ -546,7 +546,7 @@ def get_prompt_cache_path(sample_name, model_size):
 def get_luxtts_prompt_cache_files(sample_name):
     """Get LuxTTS prompt cache files for a sample."""
     samples_folder = get_configured_dir("samples_folder", "samples")
-    pattern = f"{sample_name}_luxtts_*.prompt"
+    pattern = f"{sample_name}_luxtts.pt"
     return list(samples_folder.glob(pattern))
 
 
@@ -590,8 +590,6 @@ def load_sample_details(sample_name):
                 audio_data, sr = sf.read(s["wav_path"])
                 duration = len(audio_data) / sr
                 info = f"**Info**\n\nDuration: {duration:.2f}s | {qwen_status} | {lux_status}"
-            except:
-                info = f"**Info**\n\n{qwen_status} | {lux_status}"
             except:
                 info = f"**Info**\n\n{qwen_status} | {lux_status}"
 

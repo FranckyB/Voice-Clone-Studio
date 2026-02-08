@@ -60,7 +60,9 @@ class VoiceCloneTool(Tool):
         engine_settings = _user_config.get("enabled_engines", {})
         visible_options = []
         for engine_key, engine_info in TTS_ENGINES.items():
-            if engine_settings.get(engine_key, engine_info.get("default_enabled", True)):
+            if engine_settings.get(
+                engine_key, engine_info.get("default_enabled", True)
+            ):
                 visible_options.extend(engine_info["choices"])
         # Fall back to all options if nothing is enabled (safety)
         if not visible_options:
@@ -306,13 +308,9 @@ class VoiceCloneTool(Tool):
                     components["luxtts_num_steps"] = luxtts_params["num_steps"]
                     components["luxtts_t_shift"] = luxtts_params["t_shift"]
                     components["luxtts_speed"] = luxtts_params["speed"]
-                    components["luxtts_return_smooth"] = luxtts_params[
-                        "return_smooth"
-                    ]
+                    components["luxtts_return_smooth"] = luxtts_params["return_smooth"]
                     components["luxtts_rms"] = luxtts_params["rms"]
-                    components["luxtts_ref_duration"] = luxtts_params[
-                        "ref_duration"
-                    ]
+                    components["luxtts_ref_duration"] = luxtts_params["ref_duration"]
                     components["luxtts_guidance_scale"] = luxtts_params[
                         "guidance_scale"
                     ]
@@ -366,34 +364,34 @@ class VoiceCloneTool(Tool):
                 return strip_sample_extension(selected[0])
             return None
 
-    def generate_audio_handler(
-        sample_name,
-        text_to_generate,
-        language,
-        seed,
-        model_selection="Qwen3 - Small",
-        qwen_do_sample=True,
-        qwen_temperature=0.9,
-        qwen_top_k=50,
-        qwen_top_p=1.0,
-        qwen_repetition_penalty=1.05,
-        qwen_max_new_tokens=2048,
-        vv_do_sample=False,
-        vv_temperature=1.0,
-        vv_top_k=50,
-        vv_top_p=1.0,
-        vv_repetition_penalty=1.0,
-        vv_cfg_scale=3.0,
-        vv_num_steps=20,
-        lux_num_steps=4,
-        lux_t_shift=0.5,
-        lux_speed=1.0,
-        lux_return_smooth=False,
-        lux_rms=0.01,
-        lux_ref_duration=30,
-        lux_guidance_scale=3.0,
-        progress=gr.Progress(),
-    ):
+        def generate_audio_handler(
+            sample_name,
+            text_to_generate,
+            language,
+            seed,
+            model_selection="Qwen3 - Small",
+            qwen_do_sample=True,
+            qwen_temperature=0.9,
+            qwen_top_k=50,
+            qwen_top_p=1.0,
+            qwen_repetition_penalty=1.05,
+            qwen_max_new_tokens=2048,
+            vv_do_sample=False,
+            vv_temperature=1.0,
+            vv_top_k=50,
+            vv_top_p=1.0,
+            vv_repetition_penalty=1.0,
+            vv_cfg_scale=3.0,
+            vv_num_steps=20,
+            lux_num_steps=4,
+            lux_t_shift=0.5,
+            lux_speed=1.0,
+            lux_return_smooth=False,
+            lux_rms=0.01,
+            lux_ref_duration=30,
+            lux_guidance_scale=3.0,
+            progress=gr.Progress(),
+        ):
             """Generate audio using voice cloning - supports Qwen, VibeVoice, and LuxTTS engines."""
             if not sample_name:
                 return None, "Please select a voice sample first."
@@ -432,7 +430,9 @@ class VoiceCloneTool(Tool):
                 return None, f"❌ Sample '{sample_name}' not found."
 
             # Check that sample has a transcript (required for all engines)
-            sample_ref_text = sample.get("ref_text") or sample.get("meta", {}).get("Text", "")
+            sample_ref_text = sample.get("ref_text") or sample.get("meta", {}).get(
+                "Text", ""
+            )
             if not sample_ref_text.strip():
                 return None, (
                     f"❌ No transcript found for sample '{sample_name}'.\n\n"
@@ -514,21 +514,23 @@ class VoiceCloneTool(Tool):
                     progress(0.05, desc="Loading LuxTTS model...")
 
                     # Generate using manager method (with prompt caching)
-                    audio_data, sr, was_cached = tts_manager.generate_voice_clone_luxtts(
-                        text=text_to_generate,
-                        voice_sample_path=sample["wav_path"],
-                        sample_name=sample_name,
-                        num_steps=int(lux_num_steps),
-                        t_shift=float(lux_t_shift),
-                        speed=float(lux_speed),
-                        return_smooth=bool(lux_return_smooth),
-                        rms=float(lux_rms),
-                        ref_duration=int(lux_ref_duration),
-                        guidance_scale=float(lux_guidance_scale),
-                        seed=seed,
-                        ref_text=sample.get("ref_text")
-                        or sample.get("meta", {}).get("Text"),
-                        progress_callback=progress,
+                    audio_data, sr, was_cached = (
+                        tts_manager.generate_voice_clone_luxtts(
+                            text=text_to_generate,
+                            voice_sample_path=sample["wav_path"],
+                            sample_name=sample_name,
+                            num_steps=int(lux_num_steps),
+                            t_shift=float(lux_t_shift),
+                            speed=float(lux_speed),
+                            return_smooth=bool(lux_return_smooth),
+                            rms=float(lux_rms),
+                            ref_duration=int(lux_ref_duration),
+                            guidance_scale=float(lux_guidance_scale),
+                            seed=seed,
+                            ref_text=sample.get("ref_text")
+                            or sample.get("meta", {}).get("Text"),
+                            progress_callback=progress,
+                        )
                     )
                     wavs = [audio_data]
                     engine_display = "LuxTTS"
@@ -544,22 +546,25 @@ class VoiceCloneTool(Tool):
 
                 # Save metadata file
                 metadata_file = output_file.with_suffix(".txt")
-                metadata = dedent(f"""\
+                metadata = dedent(
+                    f"""\
                     Generated: {timestamp}
                     Sample: {sample_name}
                     Engine: {engine_display}
                     Language: {language}
                     Seed: {seed}
                     Text: {text_to_generate.strip()}
-                    """)
+                    """
+                )
                 metadata_file.write_text(metadata, encoding="utf-8")
 
                 progress(1.0, desc="Done!")
                 if play_completion_beep:
                     play_completion_beep()
-                return str(
-                    output_file
-                ), f"Generated using {engine_display}. {cache_status}\n{seed_msg}"
+                return (
+                    str(output_file),
+                    f"Generated using {engine_display}. {cache_status}\n{seed_msg}",
+                )
 
             except ImportError as e:
                 return None, f"❌ Dependency error: {str(e)}"
