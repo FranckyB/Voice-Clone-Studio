@@ -592,6 +592,8 @@ def load_sample_details(sample_name):
                 info = f"**Info**\n\nDuration: {duration:.2f}s | {qwen_status} | {lux_status}"
             except:
                 info = f"**Info**\n\n{qwen_status} | {lux_status}"
+            except:
+                info = f"**Info**\n\n{qwen_status} | {lux_status}"
 
             # Add design instructions if this was a Voice Design sample
             meta = s.get("meta", {})
@@ -716,6 +718,7 @@ def build_shared_state(
     from modules.core_components.ui_components import (
         create_qwen_advanced_params,
         create_vibevoice_advanced_params,
+        create_luxtts_advanced_params,
         create_emotion_intensity_slider,
         create_pause_controls,
     )
@@ -825,11 +828,13 @@ def build_shared_state(
         "VOICE_CLONE_OPTIONS": constants.get("VOICE_CLONE_OPTIONS"),
         "DEFAULT_VOICE_CLONE_MODEL": constants.get("DEFAULT_VOICE_CLONE_MODEL"),
         "LUXTTS_DEFAULTS": constants.get("LUXTTS_DEFAULTS", {}),
+        "TTS_ENGINES": constants.get("TTS_ENGINES", {}),
         "WHISPER_AVAILABLE": WHISPER_AVAILABLE,
         "DEEPFILTER_AVAILABLE": DEEPFILTER_AVAILABLE,
         # UI component creators
         "create_qwen_advanced_params": create_qwen_advanced_params,
         "create_vibevoice_advanced_params": create_vibevoice_advanced_params,
+        "create_luxtts_advanced_params": create_luxtts_advanced_params,
         "create_emotion_intensity_slider": create_emotion_intensity_slider,
         "create_pause_controls": create_pause_controls,
         # Emotion management
@@ -993,6 +998,7 @@ def run_tool_standalone(
         VOICE_CLONE_OPTIONS,
         DEFAULT_VOICE_CLONE_MODEL,
         LUXTTS_DEFAULTS,
+        TTS_ENGINES,
     )
 
     # Find project root
@@ -1053,6 +1059,7 @@ def run_tool_standalone(
                 "VOICE_CLONE_OPTIONS": VOICE_CLONE_OPTIONS,
                 "DEFAULT_VOICE_CLONE_MODEL": DEFAULT_VOICE_CLONE_MODEL,
                 "LUXTTS_DEFAULTS": LUXTTS_DEFAULTS,
+                "TTS_ENGINES": TTS_ENGINES,
             },
             confirm_trigger=confirm_trigger,
             input_trigger=input_trigger,

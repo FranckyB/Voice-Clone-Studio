@@ -49,10 +49,10 @@ def show_voice_clone_help():
         &nbsp;
 
         #### Performance Tips:
-        - ⚡ **First generation** for a sample takes longer (creates prompt cache)
-        - ⚡ **Subsequent generations** use cached prompt and are much faster
-        - 🔄 Cache is **per model size** - switching sizes recreates cache
-        - 💾 Qwen caches are saved as `.pt` files; LuxTTS caches are `.prompt` files
+    - ⚡ **First generation** for a sample takes longer (creates prompt cache)
+    - ⚡ **Subsequent generations** use cached prompt and are much faster
+    - 🔄 Cache is **per model size** - switching sizes recreates cache
+    - 💾 Qwen caches are saved as `.pt` files; LuxTTS caches are `_luxtts.pt` files
 
         &nbsp;
 

@@ -2,6 +2,13 @@
 
 
 ## February 7, 2026
+#### Version 1.1.0 - Added support for LuxTTS
+- Added to Voice Cloning tab.
+- Added to Conversation Tab. (By stiching together multiple generations)
+- Forces LuxTTS to use our pre-trancribed text files. Bypassing its internal transcribe step.
+- Creates caches for each sample used. Making it faster on the next run.
+
+## February 7, 2026
 
 #### Version 1.0.0 - Complete Modular Rewrite
 - **LuxTTS Voice Clone Engine** - Added LuxTTS as a third voice cloning engine with 48 kHz output, caching, and UI controls

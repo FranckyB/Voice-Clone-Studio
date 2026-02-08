@@ -108,17 +108,6 @@ class SettingsTool(Tool):
                                         info="Auto = fastest available.",
                                     )
                                 )
-                                with gr.Column():
-                                    gr.Markdown("### Audio Notifications")
-                                    components["settings_audio_notifications"] = (
-                                        gr.Checkbox(
-                                            label="Enable Audio Notifications",
-                                            value=_user_config.get(
-                                                "browser_notifications", True
-                                            ),
-                                            info="Play sound when audio generation completes",
-                                        )
-                                    )
 
                             with gr.Column():
                                 gr.Markdown("### Model Downloading")
@@ -148,6 +137,8 @@ class SettingsTool(Tool):
                                         "LuxTTS",
                                         "--- VibeVoice ASR ---",
                                         "VibeVoice-ASR",
+                                        "--- LuxTTS ---",
+                                        "LuxTTS",
                                     ],
                                     value="Qwen3-TTS-12Hz-0.6B-Base",
                                 )
@@ -167,7 +158,47 @@ class SettingsTool(Tool):
                                     "VibeVoice-Large": "FranckyB/VibeVoice-Large",
                                     "LuxTTS": "YatharthS/LuxTTS",
                                     "VibeVoice-ASR": "microsoft/VibeVoice-ASR",
+                                    "LuxTTS": "YatharthS/LuxTTS",
                                 }
+
+                        with gr.Row():
+                            with gr.Column():
+                                gr.Markdown("### Available Voice Clone Engines")
+
+                                # Get TTS_ENGINES from shared_state
+                                TTS_ENGINES = shared_state.get("TTS_ENGINES", {})
+                                engine_settings = _user_config.get(
+                                    "enabled_engines", {}
+                                )
+
+                                with gr.Column():
+                                    for engine_key, engine_info in TTS_ENGINES.items():
+                                        is_enabled = engine_settings.get(
+                                            engine_key,
+                                            engine_info.get("default_enabled", True),
+                                        )
+                                        components[f"engine_toggle_{engine_key}"] = (
+                                            gr.Checkbox(
+                                                label=engine_info["label"],
+                                                value=is_enabled,
+                                                interactive=True,
+                                            )
+                                        )
+
+                            with gr.Column():
+                                gr.Markdown("### Audio Notifications")
+                                components["settings_audio_notifications"] = (
+                                    gr.Checkbox(
+                                        label="Enable Audio Notifications",
+                                        value=_user_config.get(
+                                            "browser_notifications", True
+                                        ),
+                                        info="Play sound when audio generation completes",
+                                    )
+                                )
+
+                            with gr.Column():
+                                gr.Markdown("")
 
                         gr.Markdown("### Folder Paths")
                         gr.Markdown(
@@ -344,11 +375,30 @@ class SettingsTool(Tool):
             save_preference("enabled_tools", _user_config["enabled_tools"])
             return "Restart the app to apply changes."
 
+        # Engine toggle handlers
+        TTS_ENGINES = shared_state.get("TTS_ENGINES", {})
+
+        def toggle_engine(engine_key, enabled):
+            """Save engine visibility to config."""
+            if "enabled_engines" not in _user_config:
+                _user_config["enabled_engines"] = {}
+            _user_config["enabled_engines"][engine_key] = enabled
+            save_preference("enabled_engines", _user_config["enabled_engines"])
+            return "Restart the app to apply changes."
+
         for key, label in TOGGLEABLE_TOOLS:
             comp = components[f"tool_toggle_{key}"]
             # Use default arg to capture key in closure
             comp.change(
                 lambda enabled, k=key: toggle_tool(k, enabled),
+                inputs=[comp],
+                outputs=[components["settings_status"]],
+            )
+
+        for engine_key in TTS_ENGINES:
+            comp = components[f"engine_toggle_{engine_key}"]
+            comp.change(
+                lambda enabled, k=engine_key: toggle_engine(k, enabled),
                 inputs=[comp],
                 outputs=[components["settings_status"]],
             )

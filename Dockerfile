@@ -92,6 +92,12 @@ RUN pip install --no-cache-dir \
 
 COPY ./requirements.txt /home/user/app/requirements.txt
 RUN pip install --no-cache-dir -r /home/user/app/requirements.txt
+
+# LuxTTS voice cloning engine
+RUN pip install --no-cache-dir git+https://github.com/ysharma3501/LinaCodec.git && \
+    pip install --no-cache-dir piper-phonemize --find-links https://k2-fsa.github.io/icefall/piper_phonemize.html && \
+    pip install --no-cache-dir "zipvoice @ git+https://github.com/ysharma3501/LuxTTS.git"
+
 RUN rustup self uninstall -y
 
 

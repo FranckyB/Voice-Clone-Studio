@@ -51,10 +51,29 @@ class VoiceCloneTool(Tool):
         get_prompt_cache_path = shared_state["get_prompt_cache_path"]
         LANGUAGES = shared_state["LANGUAGES"]
         VOICE_CLONE_OPTIONS = shared_state["VOICE_CLONE_OPTIONS"]
-        DEFAULT_VOICE_CLONE_MODEL = shared_state["DEFAULT_VOICE_CLONE_MODEL"]
+        TTS_ENGINES = shared_state.get("TTS_ENGINES", {})
         LUXTTS_DEFAULTS = shared_state.get("LUXTTS_DEFAULTS", {})
         _user_config = shared_state["_user_config"]
         _active_emotions = shared_state["_active_emotions"]
+
+        # Filter voice clone options based on enabled engines
+        engine_settings = _user_config.get("enabled_engines", {})
+        visible_options = []
+        for engine_key, engine_info in TTS_ENGINES.items():
+            if engine_settings.get(engine_key, engine_info.get("default_enabled", True)):
+                visible_options.extend(engine_info["choices"])
+        # Fall back to all options if nothing is enabled (safety)
+        if not visible_options:
+            visible_options = VOICE_CLONE_OPTIONS
+
+        # Resolve default model based on which engines are enabled
+        from modules.core_components.constants import get_default_voice_clone_model
+
+        default_model = get_default_voice_clone_model(_user_config)
+        saved_model = _user_config.get("voice_clone_model", default_model)
+        if saved_model not in visible_options:
+            saved_model = visible_options[0]
+
         show_input_modal_js = shared_state["show_input_modal_js"]
         show_confirmation_modal_js = shared_state["show_confirmation_modal_js"]
         save_emotion_handler = shared_state["save_emotion_handler"]
@@ -100,7 +119,7 @@ class VoiceCloneTool(Tool):
                     )
 
                     components["sample_info"] = gr.Textbox(
-                        label="Info", interactive=False, max_lines=3, value=None
+                        label="Info", interactive=False, max_lines=10, value=None
                     )
 
                 # Right column - Generation (2/3 width)
@@ -113,12 +132,21 @@ class VoiceCloneTool(Tool):
                         lines=6,
                     )
 
+                    with gr.Row():
+                        components["clone_model_dropdown"] = gr.Dropdown(
+                            choices=visible_options,
+                            value=saved_model,
+                            label="Engine & Model (Qwen3, VibeVoice, or LuxTTS)",
+                            scale=4,
+                        )
+                        components["seed_input"] = gr.Number(
+                            label="Seed (-1 for random)", value=-1, precision=0, scale=1
+                        )
+
+                    # Determine which model is initially selected to conditionally show/hide parameters
+                    is_qwen_initial = "Qwen" in saved_model
+
                     # Language dropdown (hidden for VibeVoice models)
-                    selected_engine = _user_config.get(
-                        "voice_clone_model", DEFAULT_VOICE_CLONE_MODEL
-                    )
-                    is_qwen_initial = "Qwen" in selected_engine
-                    is_lux_initial = "LuxTTS" in selected_engine
                     components["language_row"] = gr.Row(visible=is_qwen_initial)
                     with components["language_row"]:
                         components["language_dropdown"] = gr.Dropdown(
@@ -127,21 +155,7 @@ class VoiceCloneTool(Tool):
                             label="Language",
                         )
 
-                    with gr.Row():
-                        components["clone_model_dropdown"] = gr.Dropdown(
-                            choices=VOICE_CLONE_OPTIONS,
-                            value=_user_config.get(
-                                "voice_clone_model", DEFAULT_VOICE_CLONE_MODEL
-                            ),
-                            label="Engine & Model (Qwen3, VibeVoice, LuxTTS)",
-                            scale=4,
-                        )
-                        components["seed_input"] = gr.Number(
-                            label="Seed (-1 for random)", value=-1, precision=0, scale=1
-                        )
-
                     # Qwen3 Advanced Parameters (create_qwen_advanced_params includes its own accordion)
-                    is_qwen_initial = "Qwen" in selected_engine
                     create_qwen_advanced_params = shared_state[
                         "create_qwen_advanced_params"
                     ]
@@ -184,10 +198,11 @@ class VoiceCloneTool(Tool):
                     components["qwen_max_new_tokens"] = qwen_params["max_new_tokens"]
 
                     # VibeVoice Advanced Parameters
+                    is_vv_initial = "VibeVoice" in saved_model
                     components["vv_params_accordion"] = gr.Accordion(
                         "VibeVoice Advanced Parameters",
                         open=False,
-                        visible=("VibeVoice" in selected_engine),
+                        visible=is_vv_initial,
                     )
                     with components["vv_params_accordion"]:
                         with gr.Row():
@@ -252,88 +267,55 @@ class VoiceCloneTool(Tool):
                                 info="Cumulative probability threshold",
                             )
 
-                    components["lux_params_accordion"] = gr.Accordion(
-                        "LuxTTS Parameters", open=False, visible=is_lux_initial
+                    # LuxTTS Advanced Parameters
+                    is_lux_initial = "LuxTTS" in saved_model
+                    create_luxtts_advanced_params = shared_state[
+                        "create_luxtts_advanced_params"
+                    ]
+                    luxtts_params = create_luxtts_advanced_params(
+                        initial_num_steps=_user_config.get(
+                            "luxtts_num_steps",
+                            LUXTTS_DEFAULTS.get("num_steps", 4),
+                        ),
+                        initial_t_shift=_user_config.get(
+                            "luxtts_t_shift",
+                            LUXTTS_DEFAULTS.get("t_shift", 0.5),
+                        ),
+                        initial_speed=_user_config.get(
+                            "luxtts_speed", LUXTTS_DEFAULTS.get("speed", 1.0)
+                        ),
+                        initial_return_smooth=_user_config.get(
+                            "luxtts_return_smooth",
+                            LUXTTS_DEFAULTS.get("return_smooth", False),
+                        ),
+                        initial_rms=_user_config.get(
+                            "luxtts_rms", LUXTTS_DEFAULTS.get("rms", 0.01)
+                        ),
+                        initial_ref_duration=_user_config.get(
+                            "luxtts_ref_duration",
+                            LUXTTS_DEFAULTS.get("ref_duration", 30),
+                        ),
+                        initial_guidance_scale=_user_config.get(
+                            "luxtts_guidance_scale", 3.0
+                        ),
+                        visible=is_lux_initial,
                     )
-                    with components["lux_params_accordion"]:
-                        with gr.Row():
-                            components["lux_device"] = gr.Dropdown(
-                                choices=["auto", "cpu", "cuda"],
-                                value=_user_config.get(
-                                    "luxtts_device",
-                                    LUXTTS_DEFAULTS.get("device", "auto"),
-                                ),
-                                label="Device",
-                                info="Auto selects CUDA when available",
-                            )
-                            components["lux_threads"] = gr.Number(
-                                label="CPU Threads",
-                                value=_user_config.get(
-                                    "luxtts_threads", LUXTTS_DEFAULTS.get("threads", 2)
-                                ),
-                                precision=0,
-                            )
-
-                        with gr.Row():
-                            components["lux_num_steps"] = gr.Slider(
-                                minimum=1,
-                                maximum=12,
-                                value=_user_config.get(
-                                    "luxtts_num_steps",
-                                    LUXTTS_DEFAULTS.get("num_steps", 4),
-                                ),
-                                step=1,
-                                label="Inference Steps",
-                            )
-                            components["lux_t_shift"] = gr.Slider(
-                                minimum=0.1,
-                                maximum=1.5,
-                                value=_user_config.get(
-                                    "luxtts_t_shift",
-                                    LUXTTS_DEFAULTS.get("t_shift", 0.9),
-                                ),
-                                step=0.05,
-                                label="t_shift",
-                            )
-
-                        with gr.Row():
-                            components["lux_speed"] = gr.Slider(
-                                minimum=0.5,
-                                maximum=1.5,
-                                value=_user_config.get(
-                                    "luxtts_speed", LUXTTS_DEFAULTS.get("speed", 1.0)
-                                ),
-                                step=0.05,
-                                label="Speed",
-                            )
-                            components["lux_return_smooth"] = gr.Checkbox(
-                                label="Return Smooth",
-                                value=_user_config.get(
-                                    "luxtts_return_smooth",
-                                    LUXTTS_DEFAULTS.get("return_smooth", False),
-                                ),
-                            )
-
-                        with gr.Row():
-                            components["lux_rms"] = gr.Slider(
-                                minimum=0.001,
-                                maximum=0.05,
-                                value=_user_config.get(
-                                    "luxtts_rms", LUXTTS_DEFAULTS.get("rms", 0.01)
-                                ),
-                                step=0.001,
-                                label="RMS",
-                            )
-                            components["lux_ref_duration"] = gr.Slider(
-                                minimum=1.0,
-                                maximum=20.0,
-                                value=_user_config.get(
-                                    "luxtts_ref_duration",
-                                    LUXTTS_DEFAULTS.get("ref_duration", 5.0),
-                                ),
-                                step=0.5,
-                                label="Reference Duration (s)",
-                            )
+                    components["luxtts_params_accordion"] = luxtts_params.get(
+                        "accordion"
+                    )
+                    components["luxtts_num_steps"] = luxtts_params["num_steps"]
+                    components["luxtts_t_shift"] = luxtts_params["t_shift"]
+                    components["luxtts_speed"] = luxtts_params["speed"]
+                    components["luxtts_return_smooth"] = luxtts_params[
+                        "return_smooth"
+                    ]
+                    components["luxtts_rms"] = luxtts_params["rms"]
+                    components["luxtts_ref_duration"] = luxtts_params[
+                        "ref_duration"
+                    ]
+                    components["luxtts_guidance_scale"] = luxtts_params[
+                        "guidance_scale"
+                    ]
 
                     components["generate_btn"] = gr.Button(
                         "Generate Audio", variant="primary", size="lg"
@@ -384,41 +366,40 @@ class VoiceCloneTool(Tool):
                 return strip_sample_extension(selected[0])
             return None
 
-        def generate_audio_handler(
-            sample_name,
-            text_to_generate,
-            language,
-            seed,
-            model_selection="Qwen3 - Small",
-            qwen_do_sample=True,
-            qwen_temperature=0.9,
-            qwen_top_k=50,
-            qwen_top_p=1.0,
-            qwen_repetition_penalty=1.05,
-            qwen_max_new_tokens=2048,
-            vv_do_sample=False,
-            vv_temperature=1.0,
-            vv_top_k=50,
-            vv_top_p=1.0,
-            vv_repetition_penalty=1.0,
-            vv_cfg_scale=3.0,
-            vv_num_steps=20,
-            lux_device="auto",
-            lux_threads=2,
-            lux_num_steps=4,
-            lux_t_shift=0.9,
-            lux_speed=1.0,
-            lux_return_smooth=False,
-            lux_rms=0.01,
-            lux_ref_duration=5.0,
-            progress=gr.Progress(),
-        ):
+    def generate_audio_handler(
+        sample_name,
+        text_to_generate,
+        language,
+        seed,
+        model_selection="Qwen3 - Small",
+        qwen_do_sample=True,
+        qwen_temperature=0.9,
+        qwen_top_k=50,
+        qwen_top_p=1.0,
+        qwen_repetition_penalty=1.05,
+        qwen_max_new_tokens=2048,
+        vv_do_sample=False,
+        vv_temperature=1.0,
+        vv_top_k=50,
+        vv_top_p=1.0,
+        vv_repetition_penalty=1.0,
+        vv_cfg_scale=3.0,
+        vv_num_steps=20,
+        lux_num_steps=4,
+        lux_t_shift=0.5,
+        lux_speed=1.0,
+        lux_return_smooth=False,
+        lux_rms=0.01,
+        lux_ref_duration=30,
+        lux_guidance_scale=3.0,
+        progress=gr.Progress(),
+    ):
             """Generate audio using voice cloning - supports Qwen, VibeVoice, and LuxTTS engines."""
             if not sample_name:
-                return None, "❌ Please select a voice sample first."
+                return None, "Please select a voice sample first."
 
             if not text_to_generate or not text_to_generate.strip():
-                return None, "❌ Please enter text to generate."
+                return None, "Please enter text to generate."
 
             # Parse model selection to determine engine and size
             if "LuxTTS" in model_selection:
@@ -449,6 +430,15 @@ class VoiceCloneTool(Tool):
 
             if not sample:
                 return None, f"❌ Sample '{sample_name}' not found."
+
+            # Check that sample has a transcript (required for all engines)
+            sample_ref_text = sample.get("ref_text") or sample.get("meta", {}).get("Text", "")
+            if not sample_ref_text.strip():
+                return None, (
+                    f"❌ No transcript found for sample '{sample_name}'.\n\n"
+                    "Please transcribe this sample first in the **Prep Audio** tab "
+                    "(using Whisper or VibeVoice ASR), then try again."
+                )
 
             try:
                 # Set the seed for reproducibility
@@ -520,24 +510,25 @@ class VoiceCloneTool(Tool):
                     engine_display = f"VibeVoice-{model_size}"
                     cache_status = "no caching (VibeVoice)"
 
-                else:  # LuxTTS engine
-                    progress(0.1, desc="Loading LuxTTS model...")
+                elif engine == "luxtts":
+                    progress(0.05, desc="Loading LuxTTS model...")
 
-                    audio_data, sr, was_cached = (
-                        tts_manager.generate_voice_clone_luxtts(
-                            text=text_to_generate,
-                            sample_name=sample_name,
-                            voice_sample_path=sample["wav_path"],
-                            num_steps=lux_num_steps,
-                            t_shift=lux_t_shift,
-                            speed=lux_speed,
-                            return_smooth=lux_return_smooth,
-                            rms=lux_rms,
-                            ref_duration=lux_ref_duration,
-                            device=lux_device,
-                            threads=lux_threads,
-                            progress_callback=progress,
-                        )
+                    # Generate using manager method (with prompt caching)
+                    audio_data, sr, was_cached = tts_manager.generate_voice_clone_luxtts(
+                        text=text_to_generate,
+                        voice_sample_path=sample["wav_path"],
+                        sample_name=sample_name,
+                        num_steps=int(lux_num_steps),
+                        t_shift=float(lux_t_shift),
+                        speed=float(lux_speed),
+                        return_smooth=bool(lux_return_smooth),
+                        rms=float(lux_rms),
+                        ref_duration=int(lux_ref_duration),
+                        guidance_scale=float(lux_guidance_scale),
+                        seed=seed,
+                        ref_text=sample.get("ref_text")
+                        or sample.get("meta", {}).get("Text"),
+                        progress_callback=progress,
                     )
                     wavs = [audio_data]
                     engine_display = "LuxTTS"
@@ -744,14 +735,13 @@ class VoiceCloneTool(Tool):
                 components["vv_repetition_penalty"],
                 components["vv_cfg_scale"],
                 components["vv_num_steps"],
-                components["lux_device"],
-                components["lux_threads"],
-                components["lux_num_steps"],
-                components["lux_t_shift"],
-                components["lux_speed"],
-                components["lux_return_smooth"],
-                components["lux_rms"],
-                components["lux_ref_duration"],
+                components["luxtts_num_steps"],
+                components["luxtts_t_shift"],
+                components["luxtts_speed"],
+                components["luxtts_return_smooth"],
+                components["luxtts_rms"],
+                components["luxtts_ref_duration"],
+                components["luxtts_guidance_scale"],
             ],
             outputs=[components["output_audio"], components["clone_status"]],
         )
@@ -767,14 +757,14 @@ class VoiceCloneTool(Tool):
             outputs=[components["language_row"]],
         )
 
-        # Toggle accordion visibility based on engine
+        # Toggle accordion visibility based on engine (Qwen / VibeVoice / LuxTTS)
         def toggle_engine_params(model_selection):
             is_qwen = "Qwen" in model_selection
-            is_vibe = "VibeVoice" in model_selection
+            is_vv = "VibeVoice" in model_selection
             is_lux = "LuxTTS" in model_selection
             return (
                 gr.update(visible=is_qwen),
-                gr.update(visible=is_vibe),
+                gr.update(visible=is_vv),
                 gr.update(visible=is_lux),
             )
 
@@ -784,7 +774,7 @@ class VoiceCloneTool(Tool):
             outputs=[
                 components["qwen_params_accordion"],
                 components["vv_params_accordion"],
-                components["lux_params_accordion"],
+                components["luxtts_params_accordion"],
             ],
         )
 
@@ -802,44 +792,39 @@ class VoiceCloneTool(Tool):
             outputs=[],
         )
 
-        components["lux_device"].change(
-            lambda x: save_preference("luxtts_device", x),
-            inputs=[components["lux_device"]],
-            outputs=[],
-        )
-        components["lux_threads"].change(
-            lambda x: save_preference("luxtts_threads", int(x) if x is not None else 0),
-            inputs=[components["lux_threads"]],
-            outputs=[],
-        )
-        components["lux_num_steps"].change(
+        components["luxtts_num_steps"].change(
             lambda x: save_preference("luxtts_num_steps", int(x)),
-            inputs=[components["lux_num_steps"]],
+            inputs=[components["luxtts_num_steps"]],
             outputs=[],
         )
-        components["lux_t_shift"].change(
+        components["luxtts_t_shift"].change(
             lambda x: save_preference("luxtts_t_shift", float(x)),
-            inputs=[components["lux_t_shift"]],
+            inputs=[components["luxtts_t_shift"]],
             outputs=[],
         )
-        components["lux_speed"].change(
+        components["luxtts_speed"].change(
             lambda x: save_preference("luxtts_speed", float(x)),
-            inputs=[components["lux_speed"]],
+            inputs=[components["luxtts_speed"]],
             outputs=[],
         )
-        components["lux_return_smooth"].change(
+        components["luxtts_return_smooth"].change(
             lambda x: save_preference("luxtts_return_smooth", bool(x)),
-            inputs=[components["lux_return_smooth"]],
+            inputs=[components["luxtts_return_smooth"]],
             outputs=[],
         )
-        components["lux_rms"].change(
+        components["luxtts_rms"].change(
             lambda x: save_preference("luxtts_rms", float(x)),
-            inputs=[components["lux_rms"]],
+            inputs=[components["luxtts_rms"]],
             outputs=[],
         )
-        components["lux_ref_duration"].change(
+        components["luxtts_ref_duration"].change(
             lambda x: save_preference("luxtts_ref_duration", float(x)),
-            inputs=[components["lux_ref_duration"]],
+            inputs=[components["luxtts_ref_duration"]],
+            outputs=[],
+        )
+        components["luxtts_guidance_scale"].change(
+            lambda x: save_preference("luxtts_guidance_scale", float(x)),
+            inputs=[components["luxtts_guidance_scale"]],
             outputs=[],
         )
 

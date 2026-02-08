@@ -154,7 +154,7 @@ class PrepSamplesTool(Tool):
 
                 # Right column - Audio editing
                 with gr.Column(scale=2):
-                    gr.Markdown(
+                    components["editor_heading"] = gr.Markdown(
                         "### Add or Edit Audio Sample <small>(Drag and drop audio or video files)</small>"
                     )
 
@@ -294,6 +294,11 @@ class PrepSamplesTool(Tool):
         def on_mode_change(data_type):
             """Switch between Samples and Datasets mode."""
             is_ds = is_dataset_mode(data_type)
+            heading = (
+                "### Adjust Audio Sample"
+                if is_ds
+                else "### Add or Edit Audio Sample <small>(Drag and drop audio or video files)</small>"
+            )
             return (
                 gr.update(visible=not is_ds),  # samples_col
                 gr.update(visible=is_ds),  # datasets_col
@@ -307,6 +312,7 @@ class PrepSamplesTool(Tool):
                 "",  # transcription_output
                 "",  # prep_status
                 "",  # existing_sample_info
+                heading,  # editor_heading
             )
 
         # ===== Selection handlers =====
@@ -831,6 +837,7 @@ class PrepSamplesTool(Tool):
                 components["transcription_output"],
                 components["prep_status"],
                 components["existing_sample_info"],
+                components["editor_heading"],
             ],
         )
 

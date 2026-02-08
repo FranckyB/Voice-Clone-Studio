@@ -63,7 +63,11 @@ def check_model_available_locally(model_name):
 
     # Try exact model name
     model_path = models_dir / model_name.split("/")[-1]
-    if model_path.exists() and list(model_path.glob("*.safetensors")):
+    if model_path.exists() and (
+        list(model_path.glob("*.safetensors"))
+        or list(model_path.glob("*.onnx"))
+        or list(model_path.glob("*.pt"))
+    ):
         return model_path
 
     return None
@@ -105,8 +109,8 @@ def download_model_from_huggingface(model_id, models_dir=None, local_folder_name
         models_dir.mkdir(exist_ok=True)
         local_path = models_dir / local_folder_name
 
-        # Check if already downloaded (look for any .safetensors files)
-        if list(local_path.glob("*.safetensors")):
+        # Check if already downloaded (look for model files)
+        if list(local_path.glob("*.safetensors")) or list(local_path.glob("*.onnx")) or list(local_path.glob("*.pt")):
             return True, f"Model already exists at {local_path}", str(local_path)
 
         # Check if git-lfs is installed
@@ -155,8 +159,8 @@ def download_model_from_huggingface(model_id, models_dir=None, local_folder_name
             if download_complete["returncode"] != 0:
                 return False, "Download failed. Check console for details.", None
 
-            # Verify model files exist (look for any .safetensors files)
-            if not list(local_path.glob("*.safetensors")):
+            # Verify model files exist
+            if not (list(local_path.glob("*.safetensors")) or list(local_path.glob("*.onnx")) or list(local_path.glob("*.pt"))):
                 return False, "Model files not found - download may be incomplete.", None
 
             print(f"\nSuccessfully downloaded to {local_path}\n", flush=True)

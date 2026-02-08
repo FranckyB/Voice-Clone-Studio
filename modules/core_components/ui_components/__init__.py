@@ -378,6 +378,101 @@ def create_emotion_intensity_slider(
     )
 
 
+def create_luxtts_advanced_params(
+    initial_num_steps=4,
+    initial_t_shift=0.5,
+    initial_speed=1.0,
+    initial_return_smooth=False,
+    initial_rms=0.01,
+    initial_ref_duration=30,
+    initial_guidance_scale=3.0,
+    visible=True
+):
+    """
+    Reusable LuxTTS advanced parameters accordion.
+
+    Args:
+        initial_num_steps: Default sampling steps (3-4 recommended)
+        initial_t_shift: Sampling parameter (higher = better quality but more pronunciation errors)
+        initial_speed: Speed multiplier (lower=slower)
+        initial_return_smooth: Smoother output (may reduce metallic artifacts)
+        initial_rms: Loudness control (0.01 recommended)
+        initial_ref_duration: Reference audio duration in seconds
+        initial_guidance_scale: Classifier-free guidance scale (3.0 default)
+        visible: Make accordion visible
+
+    Returns:
+        dict with component references
+    """
+    components = {}
+
+    with gr.Accordion("LuxTTS Advanced Parameters", open=False, visible=visible) as accordion:
+        with gr.Row():
+            components['num_steps'] = gr.Slider(
+                minimum=1,
+                maximum=12,
+                value=initial_num_steps,
+                step=1,
+                label="Steps (num_steps)",
+                info="Sampling steps (3-4 best for efficiency)"
+            )
+            components['t_shift'] = gr.Slider(
+                minimum=0.0,
+                maximum=2.0,
+                value=initial_t_shift,
+                step=0.05,
+                label="t_shift",
+                info="Higher = better quality but more pronunciation errors (0.5 default)"
+            )
+
+        with gr.Row():
+            components['speed'] = gr.Slider(
+                minimum=0.5,
+                maximum=2.0,
+                value=initial_speed,
+                step=0.05,
+                label="Speed",
+                info="Speed multiplier (lower=slower)"
+            )
+            components['guidance_scale'] = gr.Slider(
+                minimum=0.5,
+                maximum=6.0,
+                value=initial_guidance_scale,
+                step=0.1,
+                label="Guidance Scale",
+                info="Classifier-free guidance (3.0 default)"
+            )
+
+        with gr.Row():
+            components['rms'] = gr.Slider(
+                minimum=0.001,
+                maximum=0.05,
+                value=initial_rms,
+                step=0.001,
+                label="RMS (Loudness)",
+                info="Higher = louder (0.01 recommended)"
+            )
+            components['ref_duration'] = gr.Slider(
+                minimum=1,
+                maximum=200,
+                value=initial_ref_duration,
+                step=1,
+                label="Reference Duration (seconds)",
+                info="How many seconds of reference audio to use (increase to Max if artifacts)"
+            )
+
+        with gr.Row():
+            components['return_smooth'] = gr.Checkbox(
+                value=initial_return_smooth,
+                label="Return Smooth",
+                info="Reduce metallic artifacts (may reduce clarity)"
+            )
+
+    components['accordion'] = accordion
+
+    return components
+
+
 def create_pause_controls(
     initial_linebreak=0.5,
     initial_period=0.4,
