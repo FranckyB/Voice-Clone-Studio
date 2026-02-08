@@ -12,10 +12,10 @@ services:
       - "NVIDIA_VISIBLE_DEVICES=all"
       - "NVIDIA_DRIVER_CAPABILITIES=compute,utility"
     volumes:
+      - "./config.json:/home/user/app/config.json"
       - "./temp:/home/user/app/temp"
       - "./datasets:/home/user/app/datasets"
       - "./models:/home/user/app/models"
-      - "./trained_models:/home/user/app/trained_models"
       - "./samples:/home/user/app/samples"
       - "./output:/home/user/app/output"
       - "${HF_CACHE_HOST_PATH:-./.hf_cache}:${HF_CACHE_CONTAINER_PATH:-/home/user/app/.cache/huggingface}"

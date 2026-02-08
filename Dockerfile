@@ -48,6 +48,8 @@ RUN pip install --no-cache-dir \
     torchvision==0.24.1+cu128
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 ENV PATH="/home/user/.cargo/bin:${PATH}"
+WORKDIR /home/user/app
+COPY ./wheel /home/user/app/wheel
 RUN pip install --no-cache-dir \
     gradio==6.5.0 \
     soundfile==0.13.1 \
@@ -72,12 +74,23 @@ RUN pip install --no-cache-dir \
     onnxruntime-gpu==1.23.2 \
     markdown==3.10.1 \
     einops \
+    "gradio_filelister @ file:wheel/gradio_filelister-0.4.0-py3-none-any.whl" \
+    lhotse \
+    safetensors \
+    tensorboard \
+    vocos \
+    pydub \
+    "transformers>=4.57.3,<5" \
+    cn2an \
+    inflect \
+    jieba \
+    pypinyin \
+    "setuptools<81" \
     https://github.com/csukuangfj/piper-phonemize/releases/download/2025.06.23/piper_phonemize-1.3.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl \
-    git+https://github.com/ysharma3501/LinaCodec.git
+    git+https://github.com/ysharma3501/LinaCodec.git \
+    git+https://github.com/ysharma3501/LuxTTS.git
 
-COPY ./wheel /home/user/app/wheel
 COPY ./requirements.txt /home/user/app/requirements.txt
-WORKDIR /home/user/app
 RUN pip install --no-cache-dir -r /home/user/app/requirements.txt
 RUN rustup self uninstall -y
 
@@ -100,7 +113,7 @@ COPY ./modules /home/user/app/modules
 COPY ./wheel /home/user/app/wheel
 COPY ./tests /home/user/app/tests
 COPY ./docs /home/user/app/docs
-COPY ./config.json /home/user/app/config.json
+# COPY ./config.json /home/user/app/config.json
 COPY ./voice_clone_studio.py /home/user/app/voice_clone_studio.py
 WORKDIR /home/user/app
 EXPOSE 7860
