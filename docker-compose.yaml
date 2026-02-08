@@ -2,7 +2,7 @@ services:
   voice-clone-studio:
     build:
       context: .
-      target: runtime
+      target: app
     ports:
       - "7860:7860"
     env_file: .env

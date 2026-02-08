@@ -109,6 +109,9 @@ ENV PATH="/home/user/app/venv/bin:$PATH" \
     LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
 
 COPY --chown=1001:1001 --from=builder /home/user/app/venv /home/user/app/venv
+
+
+FROM runtime AS app
 COPY ./modules /home/user/app/modules
 COPY ./wheel /home/user/app/wheel
 COPY ./tests /home/user/app/tests

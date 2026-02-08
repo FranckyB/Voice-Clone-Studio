@@ -173,6 +173,10 @@ class SettingsTool(Tool):
                         gr.Markdown(
                             "Configure where files are stored. Changes apply after clicking **Apply Changes**."
                         )
+                        gr.Markdown(
+                            "If `HF_HOME` or `TORCH_HOME` is set in your environment, those cache paths take precedence. "
+                            "In that case, this screen updates folder paths but does not override your cache settings."
+                        )
 
                         # Default folder paths
                         default_folders = {
@@ -413,10 +417,11 @@ class SettingsTool(Tool):
                 new_models.mkdir(exist_ok=True)
                 new_trained_models.mkdir(exist_ok=True)
 
-                # Set HuggingFace cache environment variable
+                # Respect explicit cache env vars from the environment.
                 import os
 
-                os.environ["HF_HOME"] = str(new_models)
+                if not os.environ.get("HF_HOME"):
+                    os.environ["HF_HOME"] = str(new_models)
 
                 # Save to config
                 _user_config["samples_folder"] = samples
