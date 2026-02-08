@@ -5,6 +5,7 @@ services:
       target: runtime
     ports:
       - "7860:7860"
+    env_file: .env
     environment:
       - "GRADIO_SERVER_NAME=0.0.0.0"
       - "HF_HOME=${HF_CACHE_CONTAINER_PATH:-/home/user/app/.cache/huggingface}"

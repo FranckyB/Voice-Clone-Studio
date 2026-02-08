@@ -50,6 +50,8 @@ models/*
 config.json
 Qwen/
 .hf_cache/
+.cache/
+.env
 
 # Jupyter
 .ipynb_checkpoints/
