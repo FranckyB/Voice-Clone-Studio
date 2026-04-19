@@ -66,6 +66,10 @@ bitsandbytes
 # DeepFilterNet is installed separately by setup scripts with graceful fallback
 # pip install deepfilternet
 
+# Vocal separation — UVR / MDX-Net / Demucs (optional, install manually)
+# GPU version (recommended if you have CUDA):  pip install audio-separator[gpu]
+# CPU-only version:                            pip install audio-separator[cpu]
+
 # Chatterbox Voice Conversion & TTS (vendored in modules/chatterbox/)
 s3tokenizer
 conformer

@@ -17,6 +17,7 @@ from pathlib import Path
 from modules.core_components.tools import voice_clone
 from modules.core_components.tools import voice_presets
 from modules.core_components.tools import voice_changer
+from modules.core_components.tools import vocal_separator
 from modules.core_components.tools import conversation
 from modules.core_components.tools import voice_design
 from modules.core_components.tools import sound_effects
@@ -32,6 +33,7 @@ ALL_TOOLS = {
     'voice_clone': (voice_clone, voice_clone.VoiceCloneTool.config),
     'voice_presets': (voice_presets, voice_presets.VoicePresetsTool.config),
     'voice_changer': (voice_changer, voice_changer.VoiceChangerTool.config),
+    'vocal_separator': (vocal_separator, vocal_separator.VocalSeparatorTool.config),
     'conversation': (conversation, conversation.ConversationTool.config),
     'voice_design': (voice_design, voice_design.VoiceDesignTool.config),
     'sound_effects': (sound_effects, sound_effects.SoundEffectsTool.config),
