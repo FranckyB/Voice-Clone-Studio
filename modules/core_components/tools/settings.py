@@ -26,7 +26,7 @@ from modules.core_components.help_page import (
 # Format: (config_key, display_label)
 TOGGLEABLE_TOOLS = [
     ("Voice Clone", "Voice Clone"),
-    ("Conversation", "Conversation"),
+    # ("Conversation", "Conversation"),
     ("Voice Design", "Voice Design"),
     ("Prep Samples", "Prep Samples"),
     ("Train Model", "Train Model"),

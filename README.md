@@ -1,6 +1,17 @@
-# Voice Clone Studio
+# Voice Clone Studio — DramaBox Edition
 
-Voice Clone Studio DramaBox edition is a modular Gradio app focused on local voice workflows:
+> **This is a stripped-down version of [Voice Clone Studio](https://github.com/FranckyB/Voice-Clone-Studio), rebuilt around [DramaBox](https://github.com/Resemble-AI/DramaBox) as the sole TTS engine.**
+>**Meant for Voice Cloning as well as Lora generation for ComfyUI**
+>
+> For the full-featured version with multiple TTS engines (Qwen3-TTS, VibeVoice, LuxTTS, and more), see the main repo: **https://github.com/FranckyB/Voice-Clone-Studio**
+
+---
+
+> ⚠️ **DramaBox is highly prone to hallucination.** It will frequently add, drop, or mangle words — especially on longer texts. **Expect to generate multiple times** before getting a clean output. Using a seed lets you reproduce good results once you find them.
+
+---
+
+A modular Gradio app for local voice workflows powered by DramaBox:
 
 - DramaBox for TTS voice cloning and finetuning
 - MMAudio for sound effects
@@ -16,20 +27,26 @@ Voice Clone Studio DramaBox edition is a modular Gradio app focused on local voi
 ### Voice Clone (DramaBox)
 - Clone voices from your own samples
 - Seeded generation for reproducible outputs
-- Emotion preset controls
+- LoRA support for finetuned speaker voices
+- Paragraph splitting for long-form generation
 - Prompt Hub integration
 - Output metadata tracking
-
-### Train Model (DramaBox)
-- Finetune DramaBox models from dataset folders
-- Progress and log streaming in UI
-- Configurable training options
 
 ### Prep Audio
 - Trim, normalize, mono conversion, denoise
 - Extract audio from video
 - Batch transcription with Qwen3-ASR or Whisper
 - Save processed samples and manage datasets
+
+### Train Model (DramaBox)
+- Finetune DramaBox models from dataset folders
+- Progress and log streaming in UI
+- Configurable training options
+
+### Voice Design
+Create voices from natural language descriptions — no audio needed, using Qwen3-TTS Voice Design Model:
+- Describe age, gender, emotion, accent, speaking style
+- Generate unique voices matching your description
 
 ### Sound Effects
 - Text-to-audio and video-to-audio generation with MMAudio
@@ -77,19 +94,7 @@ chmod +x setup-mac.sh
 ./setup-mac.sh
 ```
 
-### Manual Setup
-```bash
-python -m venv venv
-# Windows
-venv\Scripts\activate
-# Linux or macOS
-source venv/bin/activate
-
-pip install torch==2.9.1 torchaudio==2.9.1
-pip install -r requirements_winodws.txt   # Windows
-# or
-pip install -r requirements_linux.txt      # Linux or macOS
-```
+> **Note:** Manual installation is not recommended. The setup scripts handle vendor dependencies, custom wheels, and module patching that cannot be replicated with a plain `pip install`.
 
 ## Usage
 
@@ -132,8 +137,10 @@ Voice-Clone-Studio/
 ```
 
 ## Notes
-- The active TTS path is DramaBox only.
-- Old TTS tool tabs (Voice Presets, Conversation, Voice Design, Voice Changer) are removed from the active app surface.
+
+- The only active TTS engine is DramaBox. The multi-engine support from the main Voice Clone Studio repo (Qwen3-TTS, VibeVoice, LuxTTS) is not included here.
+- **DramaBox hallucinates frequently.** Short, simple sentences work best. For longer texts, use "Split Audio by Paragraph" and review each segment.
+- For the full-featured version: **https://github.com/FranckyB/Voice-Clone-Studio**
 
 ## License
 
