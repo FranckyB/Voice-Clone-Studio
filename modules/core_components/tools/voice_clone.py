@@ -52,7 +52,7 @@ class VoiceCloneTool(Tool):
                     gr.Markdown("### Voice Sample")
 
                     components['clear_sample_btn'] = gr.Button(
-                        "Clear Sample (LoRA Only)", size="sm", variant="secondary"
+                        "Clear Sample (DramaBox Only)", size="sm", variant="secondary"
                     )
 
                     components['sample_lister'] = FileLister(
@@ -457,6 +457,22 @@ class VoiceCloneTool(Tool):
                 refresh_lora_choices,
                 inputs=[components['lora_dropdown']],
                 outputs=[components['lora_dropdown'], components['lora_path_map']]
+            )
+
+        prompt_apply_trigger = shared_state.get('prompt_apply_trigger')
+        if prompt_apply_trigger is not None:
+            import modules.core_components.prompt_hub as _prompt_hub
+
+            def _apply_vc_text(raw_value, current):
+                parsed = _prompt_hub.parse_apply_payload(raw_value)
+                if not parsed or parsed['target_id'] != 'voice_clone.text':
+                    return gr.update()
+                return gr.update(value=_prompt_hub.merge_text(current, parsed['text'], parsed['mode']))
+
+            prompt_apply_trigger.change(
+                _apply_vc_text,
+                inputs=[prompt_apply_trigger, components['text_input']],
+                outputs=[components['text_input']],
             )
 
 

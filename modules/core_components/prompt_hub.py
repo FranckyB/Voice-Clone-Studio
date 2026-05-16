@@ -15,6 +15,7 @@ PROMPTS_FILE = Path(__file__).parent.parent.parent / "prompts.json"
 PROMPT_CATEGORIES = {
     "prompt":       "Prompt",
     "conversation": "Conversation",
+    "voice_design":  "Voice Design",
     "sfx":          "SFX Design",
     "custom":       "Custom",
 }
@@ -23,16 +24,19 @@ PROMPT_CATEGORIES = {
 TOOL_CATEGORY_MAP = {
     "vc":   "prompt",
     "conv": "conversation",
+    "vd":   "voice_design",
     "sfx":  "sfx",
 }
 
 # Maps each PROMPT_TARGETS key to the prompt category it uses.
 # '_custom' is a local sentinel used by the Prompt Manager for the Custom entry.
 TARGET_CATEGORY_MAP = {
-    "voice_clone.text":        "prompt",
-    "conversation.script":     "conversation",
-    "sfx.prompt":              "sfx",
-    "_custom":                 "custom",
+    "voice_clone.text":             "prompt",
+    "conversation.script":          "conversation",
+    "voice_design.reference":       "prompt",
+    "voice_design.instructions":    "voice_design",
+    "sfx.prompt":                   "sfx",
+    "_custom":                      "custom",
 }
 
 
@@ -77,6 +81,39 @@ SYSTEM_PROMPTS = {
         "[1]: Her tone shifts — genuinely curious now, leaning forward slightly: \"What do you think about the timeline?\"\n"
         "Output only the lines in [n]: format — no narration, no headers, no extra formatting."
     ),
+    "Voice Design (Simple)": (
+        "You are a voice styling assistant for text-to-speech generation. "
+        "Convert user intent into concise style instructions focused on delivery only: tone, pacing, energy, "
+        "emotion, clarity, accent, and intensity. "
+        "Do not write dialogue or script content. Do not explain. "
+        "Output only the final style instruction text."
+    ),
+    "Voice Design (Json)": (
+        "You are a voice design assistant for text-to-speech voice creation. "
+        "Convert user intent into a structured voice design instruction. "
+        "Do not write dialogue or script content. Do not explain. "
+        "Output only one object using this exact key structure and key order:\n"
+        "{\n"
+        "  'label': '',\n"
+        "  'role_type': '<e.g., Narrator, Podcast Host, Customer Agent, Actor, News Anchor, Teacher>',\n"
+        "  'attributes': {\n"
+        "    'age_range': '<e.g., young adult, middle-aged, elderly>',\n"
+        "    'gender_presentation': '<male|female|nonbinary|androgynous|unspecified>',\n"
+        "    'timbre': '',\n"
+        "    'pitch': '<low|mid|high and numeric approximate in Hz if known, optional>',\n"
+        "    'pitch_range': '<narrow|medium|wide>',\n"
+        "    'speaking_rate': '<slow|medium|fast and approximate words/min if known, optional>',\n"
+        "    'breathiness': '<none|light|moderate|heavy>',\n"
+        "    'nasality': '<none|low|moderate|high>',\n"
+        "    'articulation': '<clear|soft-mumbled|crisp|rounded>',\n"
+        "    'warmth': '<cool|neutral|warm|very warm>',\n"
+        "    'emotional_baseline': '<neutral|warm|authoritative|wry|cheerful|calm|serious|friendly etc.>',\n"
+        "    'accent_locale': '<e.g., General American, RP British, Southern US, Australian, neutral European Spanish>',\n"
+        "    'prosody_notes': '<short notes about intonation, stress, pausing>',\n"
+        "    'phonetic_cues': ['<1-3 specific phonetic cues, e.g., elongated vowels, crisp plosives, soft sibilants>'],\n"
+        "  }\n"
+        "}"
+    ),
     "SFX": (
         "You are a sound design prompt writer. The user will give you a short idea or concept. "
         "Your job is to expand it into a detailed, evocative description of a sound or soundscape. "
@@ -101,6 +138,31 @@ PROMPT_TARGETS = {
         "template": (
             "Write final spoken text for voice generation. "
             "Return only the exact text to speak, no extra labels or notes.\n\n"
+            "User instruction:\n{instruction}"
+        ),
+    },
+    "voice_design.reference": {
+        "label": "Voice Design: Prompt",
+        "tool": "Voice Design",
+        "tab_id": "tab_voice_design",
+        "component_key": "design_text_input",
+        "default_system_preset": "TTS / Voice",
+        "template": (
+            "Write final spoken reference text for a voice design sample. "
+            "Return only the text to be spoken.\n\n"
+            "User instruction:\n{instruction}"
+        ),
+    },
+    "voice_design.instructions": {
+        "label": "Voice Design: Description",
+        "tool": "Voice Design",
+        "tab_id": "tab_voice_design",
+        "component_key": "design_instruct_input",
+        "default_system_preset": "Voice Design",
+        "template": (
+            "Write voice design instructions as one structured object. "
+            "Fill all fields with specific values when possible. "
+            "Return only the object, no markdown.\n\n"
             "User instruction:\n{instruction}"
         ),
     },

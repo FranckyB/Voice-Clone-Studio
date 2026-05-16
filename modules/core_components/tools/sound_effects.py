@@ -561,7 +561,7 @@ class SoundEffectsTool(Tool):
 
             def _apply_sfx_prompt(raw_value, current):
                 parsed = _prompt_hub.parse_apply_payload(raw_value)
-                if not parsed or parsed['target_id'] != 'sound_effects.prompt':
+                if not parsed or parsed['target_id'] != 'sfx.prompt':
                     return gr.update()
                 return gr.update(value=_prompt_hub.merge_text(current, parsed['text'], parsed['mode']))
 
@@ -573,7 +573,7 @@ class SoundEffectsTool(Tool):
 
             def _apply_sfx_negative(raw_value, current):
                 parsed = _prompt_hub.parse_apply_payload(raw_value)
-                if not parsed or parsed['target_id'] != 'sound_effects.negative':
+                if not parsed or parsed['target_id'] != 'sfx.negative':
                     return gr.update()
                 return gr.update(value=_prompt_hub.merge_text(current, parsed['text'], parsed['mode']))
 

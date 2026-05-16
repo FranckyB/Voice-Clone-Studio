@@ -583,5 +583,21 @@ class ConversationTool(Tool):
                 ]
             )
 
+        prompt_apply_trigger = shared_state.get('prompt_apply_trigger')
+        if prompt_apply_trigger is not None:
+            import modules.core_components.prompt_hub as _prompt_hub
+
+            def _apply_conv_script(raw_value, current):
+                parsed = _prompt_hub.parse_apply_payload(raw_value)
+                if not parsed or parsed['target_id'] != 'conversation.script':
+                    return gr.update()
+                return gr.update(value=_prompt_hub.merge_text(current, parsed['text'], parsed['mode']))
+
+            prompt_apply_trigger.change(
+                _apply_conv_script,
+                inputs=[prompt_apply_trigger, components['conv_script']],
+                outputs=[components['conv_script']],
+            )
+
 
 get_tool_class = lambda: ConversationTool

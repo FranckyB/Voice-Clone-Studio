@@ -219,6 +219,30 @@ def _is_server_alive():
         return False
 
 
+def _get_default_context_size():
+    """Return a context size scaled to available GPU VRAM.
+
+    Tiers:
+        >= 24 GB  ->  8192
+        >= 16 GB  ->  4096
+         < 16 GB  ->  2048
+        No GPU   ->  4096
+    """
+    try:
+        import torch
+        if torch.cuda.is_available():
+            total_vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
+            if total_vram_gb >= 24:
+                return 8192
+            elif total_vram_gb >= 16:
+                return 4096
+            else:
+                return 2048
+    except Exception:
+        pass
+    return 4096
+
+
 def _kill_llama_on_port():
     """Kill any process listening on our server port (safety net for orphans)."""
     try:
@@ -494,11 +518,13 @@ def _start_server(model_name, user_config, progress=None):
                 server_cmd = "llama-server"
             creation_flags = 0
 
+        context_size = _get_default_context_size()
         cmd_args = [
             server_cmd, "-m", model_path,
             "--port", str(SERVER_PORT),
             "--no-warmup",
-            "-c", "4096"
+            "-ngl", "100",
+            "-c", str(context_size)
         ]
 
         # Assign specific GPU if configured
@@ -929,6 +955,15 @@ class PromptManagerTool(Tool):
                                 step=0.05,
                                 interactive=True
                             )
+                        with gr.Row():
+                            components['llm_max_tokens'] = gr.Number(
+                                label="Max Tokens",
+                                value=0,
+                                precision=0,
+                                minimum=0,
+                                info="0 = unlimited (model decides)",
+                                interactive=True
+                            )
 
                     components['system_prompt_preset'] = gr.Dropdown(
                         label="System Prompt Preset",
@@ -1282,7 +1317,7 @@ class PromptManagerTool(Tool):
         # --- Generate prompt with LLM ---
         def generate_with_llm(instruction, system_prompt, model_name,
                               seed, temperature, top_k, top_p, min_p, repeat_penalty,
-                              system_prompt_preset,
+                              max_tokens, system_prompt_preset,
                               progress=gr.Progress()):
             """Send instruction to LLM and return generated prompt."""
             if not instruction or not instruction.strip():
@@ -1309,6 +1344,8 @@ class PromptManagerTool(Tool):
                     "repeat_penalty": float(repeat_penalty),
                     "seed": actual_seed,
                 }
+                if int(max_tokens) > 0:
+                    payload["max_tokens"] = int(max_tokens)
 
                 backend = user_config.get("llm_backend", "llama.cpp")
                 if backend == "Ollama":
@@ -1385,6 +1422,7 @@ class PromptManagerTool(Tool):
                         "top_p": float(top_p),
                         "min_p": float(min_p),
                         "repeat_penalty": float(repeat_penalty),
+                        "max_tokens": int(max_tokens),
                         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     })
                 except Exception:
@@ -1428,6 +1466,7 @@ class PromptManagerTool(Tool):
                 components['llm_top_p'],
                 components['llm_min_p'],
                 components['llm_repeat_penalty'],
+                components['llm_max_tokens'],
                 components['system_prompt_preset'],
             ],
             outputs=[

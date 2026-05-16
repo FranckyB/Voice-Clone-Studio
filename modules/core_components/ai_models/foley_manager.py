@@ -66,6 +66,7 @@ class FoleyManager:
         self._feature_utils = None
         self._current_model_name = None
         self._current_mode = None
+        self._current_display_name = None
 
     def _get_model_config(self, display_name):
         """
@@ -214,10 +215,9 @@ class FoleyManager:
         # Already loaded?
         if (self._net is not None and
                 self._current_model_name == cfg["model_name"] and
-                self._current_mode == cfg["mode"]):
-            # Same architecture — but if custom model, check if weights changed
-            if display_name in MMAUDIO_MODELS:
-                return True
+                self._current_mode == cfg["mode"] and
+                self._current_display_name == display_name):
+            return True
 
         # Unload previous model
         if self._net is not None:
@@ -293,6 +293,7 @@ class FoleyManager:
         self._feature_utils = feature_utils
         self._current_model_name = cfg["model_name"]
         self._current_mode = cfg["mode"]
+        self._current_display_name = display_name
 
         return True
 

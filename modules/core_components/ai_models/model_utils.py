@@ -791,20 +791,7 @@ def train_dramabox_model(folder, speaker_name, batch_size, learning_rate,
     if play_completion_beep:
         play_completion_beep()
 
-    # Auto-convert the best/final LoRA to LTX-compatible format
-    # Match speaker-named checkpoints: {slug}_dramabox_*.safetensors and {slug}_dramabox_best_*.safetensors
-    converted_paths = []
-    for lora_file in sorted(output_dir.glob("*_dramabox_*.safetensors")):
-        if lora_file.name.endswith("_ltx.safetensors"):
-            continue
-        ltx_path = convert_dramabox_lora_to_ltx(lora_file)
-        if ltx_path:
-            converted_paths.append(ltx_path.name)
-
-    msg = f"DramaBox training finished.\nOutput: {output_dir}"
-    if converted_paths:
-        msg += f"\nConverted for LTX inference: {', '.join(converted_paths)}"
-    return msg
+    return f"DramaBox training finished.\nOutput: {output_dir}"
 
 
 def convert_dramabox_lora_to_ltx(input_path, output_path=None):
@@ -833,17 +820,21 @@ def convert_dramabox_lora_to_ltx(input_path, output_path=None):
 
     if output_path is None:
         stem = input_path.stem
-        # Replace _dramabox with _ltx in the filename to keep naming consistent
-        # e.g. sleepy_dramabox_00100 → sleepy_ltx_00100
-        # e.g. sleepy_dramabox_best_00050 → sleepy_ltx_best_00050
-        # e.g. sleepy_dramabox → sleepy_ltx
-        if "_dramabox" in stem:
-            new_stem = stem.replace("_dramabox", "_ltx", 1)
+        if "dramabox" in stem.lower():
+            import re
+            new_stem = re.sub(r'dramabox', 'ltx', stem, count=1, flags=re.IGNORECASE)
         else:
             new_stem = stem + "_ltx"
         ltx_dir = input_path.parent / "LTX"
         ltx_dir.mkdir(exist_ok=True)
-        output_path = ltx_dir / (new_stem + ".safetensors")
+        # Avoid overwriting existing files — append _1, _2, ...
+        candidate = ltx_dir / (new_stem + ".safetensors")
+        if candidate.exists():
+            counter = 1
+            while (ltx_dir / (f"{new_stem}_{counter}.safetensors")).exists():
+                counter += 1
+            candidate = ltx_dir / (f"{new_stem}_{counter}.safetensors")
+        output_path = candidate
     output_path = Path(output_path)
 
     try:

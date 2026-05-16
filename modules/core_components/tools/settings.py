@@ -27,6 +27,7 @@ from modules.core_components.help_page import (
 TOGGLEABLE_TOOLS = [
     ("Voice Clone", "Voice Clone"),
     ("Conversation", "Conversation"),
+    ("Voice Design", "Voice Design"),
     ("Prep Samples", "Prep Samples"),
     ("Train Model", "Train Model"),
     ("Sound Effects", "Sound Effects"),
@@ -77,6 +78,22 @@ class SettingsTool(Tool):
                                             value=is_enabled,
                                             interactive=True
                                         )
+                                gr.Markdown("### Misc")
+                                components['settings_dark_mode_only'] = gr.Checkbox(
+                                    label="Dark Mode Only",
+                                    value=_user_config.get("dark_mode_only", True),
+                                    info="Force dark mode regardless of browser/OS setting."
+                                )
+                                components['settings_audio_notifications'] = gr.Checkbox(
+                                    label="Enable Audio Notifications",
+                                    value=_user_config.get("browser_notifications", True),
+                                    info="Play sound when audio generation completes"
+                                )
+                                components['settings_listen_on_network'] = gr.Checkbox(
+                                    label="Listen on Network",
+                                    value=_user_config.get("listen_on_network", False),
+                                    info="Allow other devices on your local network to connect. (Restart required)"
+                                )
 
                             with gr.Column():
                                 gr.Markdown("### LLM Backend (Prompt Manager)")
@@ -117,6 +134,19 @@ class SettingsTool(Tool):
                                     )
                                     components['reset_ollama_url_btn'] = gr.Button("Reset", size="sm")
 
+                                gr.Markdown("### Output")
+                                components['settings_output_format'] = gr.Dropdown(
+                                    label="Output Format",
+                                    choices=["wav", "flac", "mp3"],
+                                    value=_user_config.get("output_format", "wav"),
+                                    info="Format for saved audio files. MP3 uses 320kbps."
+                                )
+                                components['settings_manual_save'] = gr.Checkbox(
+                                    label="Review Before Saving",
+                                    value=_user_config.get("manual_save", False),
+                                    info="Results stay in temp until you click Save.\nLets you keep only the ones you like. (Restart required)"
+                                )
+
                             with gr.Column():
 
                                 gr.Markdown("### Model Optimizations")
@@ -126,17 +156,17 @@ class SettingsTool(Tool):
                                     info="Reduces CPU RAM usage when loading models."
                                 )
 
-                                components['settings_attention_mechanism'] = gr.Dropdown(
-                                    label="Choose Attention Mechanism",
-                                    choices=["auto", "flash_attention_2", "sdpa", "eager"],
-                                    value=_user_config.get("attention_mechanism", "auto"),
-                                    info="Auto = fastest available. flash_attention_2 (fastest) → sdpa (built-in PyTorch) → eager (always works)"
-                                )
+                                # components['settings_attention_mechanism'] = gr.Dropdown(
+                                #     label="Choose Attention Mechanism",
+                                #     choices=["auto", "flash_attention_2", "sdpa", "eager"],
+                                #     value=_user_config.get("attention_mechanism", "auto"),
+                                #     info="Auto = fastest available."
+                                # )
 
                                 components['settings_dramabox_cpu_offload'] = gr.Checkbox(
                                     label="DramaBox CPU Offloading",
                                     value=_user_config.get("dramabox_cpu_offload", False),
-                                    info="Keep models on CPU between generations. Saves VRAM but slow — disable for fast warm-server mode.",
+                                    info="Saves VRAM but slower — disable for fast warm-server mode.",
                                     interactive=True
                                 )
 
@@ -160,6 +190,7 @@ class SettingsTool(Tool):
                                         "--- DramaBox ---",
                                         "DramaBox DiT v1",
                                         "DramaBox Audio Components",
+                                        "DramaBox Gemma Text Encoder",
                                         "--- ASR ---",
                                         "Qwen3-ASR-Small",
                                         "Qwen3-ASR-Large",
@@ -168,44 +199,17 @@ class SettingsTool(Tool):
                                 )
                                 components['download_btn'] = gr.Button("Download Model", scale=1)
 
-                                # Mapping from display names to HuggingFace model IDs
+                                # Mapping from display names to (repo_id, filename) tuple,
+                                # repo_id string (full snapshot), or (repo_id, None) for snapshot
                                 components['MODEL_ID_MAP'] = {
-                                    "DramaBox DiT v1": "ResembleAI/DramaBox-DiT-v1",
-                                    "DramaBox Audio Components": "ResembleAI/DramaBox-Audio-Components",
+                                    "DramaBox DiT v1": ("ResembleAI/Dramabox", "dramabox-dit-v1.safetensors"),
+                                    "DramaBox Audio Components": ("ResembleAI/Dramabox", "dramabox-audio-components.safetensors"),
+                                    "DramaBox Gemma Text Encoder": ("unsloth/gemma-3-12b-it-bnb-4bit", None),
                                     "Qwen3-ASR-Small": "Qwen/Qwen3-ASR-0.6B",
                                     "Qwen3-ASR-Large": "Qwen/Qwen3-ASR-1.7B",
                                 }
 
                         with gr.Row():
-                            with gr.Column():
-                                gr.Markdown("### Network")
-                                components['settings_listen_on_network'] = gr.Checkbox(
-                                    label="Listen on Network",
-                                    value=_user_config.get("listen_on_network", False),
-                                    info="Allow other devices on your local network to connect. (Restart required)"
-                                )
-
-                                gr.Markdown("### Audio Notifications")
-                                components['settings_audio_notifications'] = gr.Checkbox(
-                                    label="Enable Audio Notifications",
-                                    value=_user_config.get("browser_notifications", True),
-                                    info="Play sound when audio generation completes"
-                                )
-
-                            with gr.Column():
-                                gr.Markdown("### Theme")
-                                components['settings_theme'] = gr.Dropdown(
-                                    label="UI Theme",
-                                    choices=["v1", "v2"],
-                                    value=_user_config.get("ui_theme", "v2"),
-                                    info="v1 = Original, v2 = Greyer (Restart required)"
-                                )
-                                components['settings_dark_mode_only'] = gr.Checkbox(
-                                    label="Dark Mode Only",
-                                    value=_user_config.get("dark_mode_only", True),
-                                    info="Force dark mode regardless of browser/OS setting."
-                                )
-
                             with gr.Column():
                                 if _torch.cuda.is_available():
                                     gr.Markdown("")
@@ -237,21 +241,7 @@ class SettingsTool(Tool):
                                             value=gpu_choices[int(_user_config.get("llama_gpu", 0))],
                                             info="GPU used for LLM prompt generation"
                                         )
-                                else:
-                                    gr.Markdown("")
 
-                                gr.Markdown("### Output")
-                                components['settings_output_format'] = gr.Dropdown(
-                                    label="Output Format",
-                                    choices=["wav", "flac", "mp3"],
-                                    value=_user_config.get("output_format", "wav"),
-                                    info="Format for saved audio files. MP3 uses 320kbps."
-                                )
-                                components['settings_manual_save'] = gr.Checkbox(
-                                    label="Review Before Saving",
-                                    value=_user_config.get("manual_save", False),
-                                    info="Results stay in temp until you click Save.\nLets you keep only the ones you like. (Restart required)"
-                                )
 
                         gr.Markdown("Configure where files are stored. Changes apply after clicking **Apply Changes**.")
                         # Default folder paths
@@ -296,7 +286,7 @@ class SettingsTool(Tool):
                                 components['settings_models_folder'] = gr.Textbox(
                                     label="Downloaded Models Folder",
                                     value=_user_config.get("models_folder", default_folders["models"]),
-                                    info="Folder for downloaded model files (Qwen, DramaBox, MMAudio)"
+                                    info="Folder for downloaded model files"
                                 )
                                 components['reset_models_btn'] = gr.Button("Reset", size="sm")
 
@@ -369,11 +359,12 @@ class SettingsTool(Tool):
             outputs=[]
         )
 
-        components['settings_attention_mechanism'].change(
-            lambda x: save_preference("attention_mechanism", x),
-            inputs=[components['settings_attention_mechanism']],
-            outputs=[]
-        )
+        if 'settings_attention_mechanism' in components:
+            components['settings_attention_mechanism'].change(
+                lambda x: save_preference("attention_mechanism", x),
+                inputs=[components['settings_attention_mechanism']],
+                outputs=[]
+            )
 
         # Save offline mode setting
         components['settings_offline_mode'].change(
@@ -423,11 +414,12 @@ class SettingsTool(Tool):
             )
 
         # Save theme setting
-        components['settings_theme'].change(
-            lambda x: (save_preference("ui_theme", x), "Restart the app to apply the new theme.")[1],
-            inputs=[components['settings_theme']],
-            outputs=[components['settings_status']]
-        )
+        if 'settings_theme' in components:
+            components['settings_theme'].change(
+                lambda x: (save_preference("ui_theme", x), "Restart the app to apply the new theme.")[1],
+                inputs=[components['settings_theme']],
+                outputs=[components['settings_status']]
+            )
 
         # Save dark mode only setting (applies live via JS)
         components['settings_dark_mode_only'].change(
@@ -552,13 +544,57 @@ class SettingsTool(Tool):
         def download_model_clicked(model_display_name):
             if not model_display_name or model_display_name.startswith("---"):
                 return "❌ Please select an actual model (not a category header)"
-            # Convert display name to full model ID
-            model_id = components['MODEL_ID_MAP'].get(model_display_name, model_display_name)
+            entry = components['MODEL_ID_MAP'].get(model_display_name, model_display_name)
 
-            success, message, path = download_model_from_huggingface(model_id, progress=None)
+            # DramaBox entries — download directly to the models folder (no HF cache)
+            if isinstance(entry, tuple):
+                repo_id, filename = entry
+                try:
+                    import os
+                    import shutil
+                    from huggingface_hub import hf_hub_download, snapshot_download
 
-            status = f"✓ {message}" if success else f"❌ {message}"
-            return status
+                    base_dir = Path(__file__).parent.parent.parent.parent
+                    models_dir = base_dir / _user_config.get("models_folder", "models")
+                    dramabox_dir = models_dir / "dramabox"
+                    dramabox_dir.mkdir(parents=True, exist_ok=True)
+
+                    token = os.environ.get("HF_TOKEN")
+
+                    if filename is not None:
+                        dest = dramabox_dir / Path(filename).name
+                        if dest.exists():
+                            return f"Already downloaded: {dest.name}"
+                        print(f"Downloading {filename} to {dramabox_dir}...")
+                        hf_hub_download(
+                            repo_id=repo_id,
+                            filename=filename,
+                            local_dir=str(dramabox_dir),
+                            token=token,
+                        )
+                        print(f"Done: {dest}")
+                        return f"Downloaded: {dest.name}"
+                    else:
+                        # Full repo (Gemma) — snapshot to a named subfolder
+                        repo_name = repo_id.split("/")[-1]
+                        dest_dir = models_dir / repo_name
+                        if dest_dir.exists() and any(dest_dir.iterdir()):
+                            return f"Already downloaded: {repo_name}"
+                        print(f"Downloading {repo_id} to {dest_dir}...")
+                        snapshot_download(
+                            repo_id=repo_id,
+                            local_dir=str(dest_dir),
+                            token=token,
+                        )
+                        print(f"Done: {dest_dir}")
+                        return f"Downloaded: {repo_name}"
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
+                    return f"❌ Download failed: {e}"
+
+            success, message, path = download_model_from_huggingface(entry, progress=None)
+            return f"Downloaded: {message}" if success else f"❌ {message}"
 
         # Apply folder changes
         def apply_folder_changes(samples, output, datasets, models, trained_models, llama_cpp_path, llama_models_path, llm_backend, ollama_url):

@@ -1,6 +1,6 @@
 # Voice Clone Studio - Windows Runtime Requirements
-# DramaBox-only build: core app + MMAudio + ASR + shared utilities.
-# Legacy engines removed: Qwen3-TTS, LuxTTS, Chatterbox, Fish Speech.
+# Build: DramaBox + Qwen3-TTS VoiceDesign + MMAudio + ASR + shared utilities.
+# Legacy engines removed: LuxTTS, Chatterbox, Fish Speech.
 
 # Core audio/model runtime dependencies (all platforms)
 numpy==1.26.4
@@ -13,6 +13,11 @@ einops==0.8.2
 huggingface_hub==0.36.2
 onnxruntime==1.24.4
 onnxruntime-gpu==1.24.4; sys_platform != 'darwin'
+hf_xet
+# NOTE: install with --no-deps to avoid onnxruntime conflicts
+qwen-tts==0.1.1
+# NOTE: downgrades transformers to 4.57.3 (qwen-asr declares 4.57.6 but works fine with 4.57.3)
+faster-qwen3-tts==0.2.6
 
 # Web UI and utilities
 gradio==6.7.0

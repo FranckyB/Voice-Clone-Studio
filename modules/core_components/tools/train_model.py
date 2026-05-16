@@ -264,7 +264,7 @@ class TrainModelTool(Tool):
 
                     components['training_status'] = gr.Textbox(
                         label="Status",
-                        lines=6,
+                        lines=12,
                         max_lines=20,
                         interactive=False
                     )

@@ -16,6 +16,7 @@ from modules.core_components.tool_base import Tool
 # Import all tool modules here
 from modules.core_components.tools import voice_clone
 from modules.core_components.tools import conversation
+from modules.core_components.tools import voice_design
 from modules.core_components.tools import sound_effects
 from modules.core_components.tools import prep_audio
 from modules.core_components.tools import train_model
@@ -28,6 +29,7 @@ from modules.core_components.tools import settings
 ALL_TOOLS = {
     'voice_clone': (voice_clone, voice_clone.VoiceCloneTool.config),
     'conversation': (conversation, conversation.ConversationTool.config),
+    'voice_design': (voice_design, voice_design.VoiceDesignTool.config),
     'sound_effects': (sound_effects, sound_effects.SoundEffectsTool.config),
     'prep_audio': (prep_audio, prep_audio.PrepSamplesTool.config),
     'train_model': (train_model, train_model.TrainModelTool.config),

@@ -20,18 +20,12 @@ GEMMA_REPO = "unsloth/gemma-3-12b-it-bnb-4bit"
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
-def _resolve_cache_root():
-    """Resolve the base cache directory for DramaBox downloads.
+def _resolve_app_models_root():
+    """Resolve the app's configured models folder from config.json.
 
-    Preference order:
-    1. An explicit HF_HOME environment override
-    2. The app's configured models folder from config.json
-    3. The default project models folder
+    Always uses the project config — never overridden by HF_HOME.
+    This is where the Settings > Download Model button places files.
     """
-    hf_home = os.environ.get("HF_HOME")
-    if hf_home:
-        return Path(hf_home)
-
     models_folder = "models"
     config_path = PROJECT_ROOT / "config.json"
     if config_path.exists():
@@ -41,11 +35,39 @@ def _resolve_cache_root():
             models_folder = config.get("models_folder", models_folder)
         except Exception:
             pass
-
     return PROJECT_ROOT / models_folder
 
-# Default cache directory inside the app's models folder
+
+def _resolve_cache_root():
+    """Resolve the HF cache root for DramaBox downloads.
+
+    Preference order:
+    1. An explicit HF_HOME environment override
+    2. The app's configured models folder from config.json
+    3. The default project models folder
+    """
+    hf_home = os.environ.get("HF_HOME")
+    if hf_home:
+        return Path(hf_home)
+    return _resolve_app_models_root()
+
+# Flat download directory — always inside the app's models folder, ignores HF_HOME
+FLAT_DRAMABOX_DIR = str(_resolve_app_models_root() / "dramabox")
+
+# HF cache directory — may be overridden by HF_HOME
 DEFAULT_CACHE = str(_resolve_cache_root() / "dramabox")
+
+
+def _read_offline_mode():
+    """Read offline_mode from config.json. Returns False if unreadable."""
+    config_path = PROJECT_ROOT / "config.json"
+    if config_path.exists():
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                return json.load(f).get("offline_mode", False)
+        except Exception:
+            pass
+    return False
 
 # Model files in the HF repo (flat structure)
 MODEL_FILES = {
@@ -54,9 +76,18 @@ MODEL_FILES = {
     "silence_latent": "assets/silence_latent_frame.pt",
 }
 
+# Assets bundled with the DramaBox code (no download needed)
+BUNDLED_ASSETS = {
+    "silence_latent": Path(__file__).parent.parent / "assets" / "silence_latent_frame.pt",
+}
+
 
 def get_model_path(name: str, cache_dir: str = None) -> str:
     """Download a model file from HF and return local path.
+
+    Checks for a flat copy in {models_dir}/dramabox/ first (placed there by
+    the Settings > Download Model button).  Falls back to hf_hub_download via
+    the HF cache when the flat copy is absent.
 
     Args:
         name: One of 'transformer', 'audio_components', 'silence_latent'
@@ -70,7 +101,26 @@ def get_model_path(name: str, cache_dir: str = None) -> str:
     if name not in MODEL_FILES:
         raise ValueError(f"Unknown model: {name}. Choose from: {list(MODEL_FILES.keys())}")
 
+    # Check bundled assets first (no download ever needed)
+    if name in BUNDLED_ASSETS and BUNDLED_ASSETS[name].exists():
+        logger.info(f"Using bundled asset for {name}: {BUNDLED_ASSETS[name]}")
+        return str(BUNDLED_ASSETS[name])
+
     repo_path = MODEL_FILES[name]
+    filename_only = Path(repo_path).name
+
+    # Check flat layout first: {app_models}/dramabox/<filename>
+    flat_path = Path(FLAT_DRAMABOX_DIR) / filename_only
+    if flat_path.exists():
+        logger.info(f"Found {name} at {flat_path}")
+        return str(flat_path)
+
+    if _read_offline_mode():
+        raise FileNotFoundError(
+            f"Offline mode is enabled and {filename_only} was not found in {Path(FLAT_DRAMABOX_DIR)}. "
+            f"Disable offline mode or use Settings > Download Model to download it first."
+        )
+
     logger.info(f"Fetching {name} from {DRAMABOX_REPO}/{repo_path}...")
 
     local_path = hf_hub_download(
@@ -87,10 +137,27 @@ def get_gemma_path(cache_dir: str = None) -> str:
     """Download Gemma 3 12B IT (pre-quantized bnb-4bit via unsloth) and return
     the snapshot directory. Using the pre-quantized variant skips runtime
     bitsandbytes quantization and ~halves the Gemma load time.
+
+    Checks for a flat copy in {models_dir}/<repo_name>/ first (placed there by
+    the Settings > Download Model button).  Falls back to snapshot_download via
+    the HF cache when the flat copy is absent.
     """
     cache_dir = cache_dir or DEFAULT_CACHE
-    logger.info(f"Fetching Gemma from {GEMMA_REPO}...")
 
+    # Check flat layout first: {app_models}/<repo_name>/
+    repo_name = GEMMA_REPO.split("/")[-1]
+    flat_path = Path(FLAT_DRAMABOX_DIR).parent / repo_name
+    if flat_path.exists() and (flat_path / "config.json").exists():
+        logger.info(f"Found Gemma at {flat_path}")
+        return str(flat_path)
+
+    if _read_offline_mode():
+        raise FileNotFoundError(
+            f"Offline mode is enabled and Gemma was not found in {flat_path}. "
+            f"Disable offline mode or use Settings > Download Model to download it first."
+        )
+
+    logger.info(f"Fetching Gemma from {GEMMA_REPO}...")
     local_dir = snapshot_download(
         repo_id=GEMMA_REPO,
         cache_dir=cache_dir,
