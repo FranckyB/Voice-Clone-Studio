@@ -251,7 +251,7 @@ class IDLoRADataset(Dataset):
 
 # ─── Model building ───
 
-def build_audio_only_model(checkpoint_path, device, dtype):
+def build_audio_only_model(checkpoint_path, device, dtype, attention_type="default"):
     from ltx_core.loader.single_gpu_model_builder import SingleGPUModelBuilder as Builder
     from ltx_core.loader.registry import DummyRegistry
     from ltx_core.loader.sd_ops import SDOps
@@ -280,7 +280,7 @@ def build_audio_only_model(checkpoint_path, device, dtype):
                 num_layers=t.get("num_layers", 48),
                 audio_cross_attention_dim=t.get("audio_cross_attention_dim", 2048),
                 norm_eps=t.get("norm_eps", 1e-6),
-                attention_type=AttentionFunction(t.get("attention_type", "default")),
+                attention_type=AttentionFunction(attention_type or t.get("attention_type", "default")),
                 positional_embedding_theta=t.get("positional_embedding_theta", 10000.0),
                 audio_positional_embedding_max_pos=t.get("audio_positional_embedding_max_pos", [20]),
                 timestep_scale_multiplier=t.get("timestep_scale_multiplier", 1000),
@@ -468,6 +468,10 @@ def parse_args():
     p.add_argument("--lr-scheduler", choices=["cosine", "linear", "constant"], default=_yaml("lr_scheduler", "cosine"))
     p.add_argument("--batch-size", type=int, default=_yaml("batch_size", 1))
     p.add_argument("--grad-accum", type=int, default=_yaml("grad_accum", 4))
+    p.add_argument("--gradient-checkpointing", type=int, default=_yaml("gradient_checkpointing", 1),
+                   help="1 = enable gradient checkpointing (saves VRAM, slower), 0 = disable (faster)")
+    p.add_argument("--num-workers", type=int, default=_yaml("num_workers", 2),
+                   help="DataLoader worker threads (0 = synchronous, try if GPU utilisation is low on Windows)")
     p.add_argument("--max-grad-norm", type=float, default=_yaml("max_grad_norm", 1.0))
     p.add_argument("--save-every", type=int, default=_yaml("save_every", 1000))
     p.add_argument("--log-every", type=int, default=_yaml("log_every", 50))
@@ -601,7 +605,7 @@ def main():
     # Load model
     if is_main:
         logging.info("Loading audio-only model...")
-    model = build_audio_only_model(args.checkpoint, device, dtype)
+    model = build_audio_only_model(args.checkpoint, device, dtype, "default")
 
     if is_main:
         logging.info("Loading audio connector...")
@@ -642,15 +646,16 @@ def main():
         logging.info(f"Save-step offset: +{args.resume_step_offset}")
 
     model.train()
-    model.base_model.model.set_gradient_checkpointing(True)
+    if args.gradient_checkpointing:
+        model.base_model.model.set_gradient_checkpointing(True)
 
     # Dataset & DataLoader
     dataset = IDLoRADataset(speaker_map)
     if is_main:
         logging.info(f"Dataset: {len(dataset)} samples, {len(dataset.speaker_map)} speakers")
 
-    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=2,
-                            pin_memory=True, drop_last=True, collate_fn=collate_fn)
+    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers,
+                            pin_memory=(args.num_workers > 0), drop_last=True, collate_fn=collate_fn)
 
     # Optimizer & Scheduler
     optimizer = torch.optim.AdamW(

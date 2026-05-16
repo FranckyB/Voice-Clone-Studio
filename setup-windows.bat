@@ -46,6 +46,21 @@ choice /C 12 /T 99 /D 1 /M "Install llama.cpp?"
 set LLAMA_CHOICE=%errorlevel%
 echo.
 
+echo ========================================
+echo Optional: Install Flash Attention 2 for faster inference?
+echo Flash Attention 2 provides fast attention for supported models.
+echo Requires CUDA GPU. Cannot be used with multilingual Chatterbox.
+echo ========================================
+echo.
+echo   1. Yes - Install Flash Attention 2 (DEFAULT)
+echo   2. No  - Skip
+echo.
+choice /C 12 /T 99 /D 1 /M "Install Flash Attention 2?"
+set FLASH_CHOICE=%errorlevel%
+echo.
+echo All questions answered - installing now...
+echo.
+
 echo [1/6] Checking Python installation...
 set PYTHON_CMD=
 where py >nul 2>&1
@@ -201,6 +216,39 @@ if not "%LLAMA_CHOICE%"=="1" goto :skip_llama
 echo Installing llama.cpp...
 winget install llama.cpp --accept-source-agreements --accept-package-agreements >nul 2>&1
 :skip_llama
+
+REM Flash Attention 2
+if not "%FLASH_CHOICE%"=="1" goto :skip_flash
+
+echo.
+echo Installing Flash Attention 2...
+setlocal enabledelayedexpansion
+
+REM Flash Attention needs Python-version-specific wheels (cp310, cp311, cp312)
+set FLASH_PY=cp3%PYMINOR%
+
+if "%CUDA_CHOICE%"=="1" (
+    set FLASH_WHL=flash_attn-2.8.3+torch2.9.1.cuda13.1-!FLASH_PY!-!FLASH_PY!-win_amd64.whl
+) else (
+    set FLASH_WHL=flash_attn-2.8.2-!FLASH_PY!-!FLASH_PY!-win_amd64.whl
+)
+set FLASH_URL=https://huggingface.co/MonsterMMORPG/Wan_GGUF/resolve/main/!FLASH_WHL!
+echo Downloading: !FLASH_WHL!
+pip install "!FLASH_URL!"
+if !errorlevel! neq 0 (
+    echo WARNING: Flash Attention 2 installation failed.
+    echo Wheel may not exist for Python 3.%PYMINOR% with your CUDA version.
+    echo You can browse available wheels at: https://huggingface.co/MonsterMMORPG/Wan_GGUF/tree/main
+) else (
+    echo Flash Attention 2 installed successfully!
+)
+endlocal
+goto :flash_done
+
+:skip_flash
+echo Skipping Flash Attention 2 installation.
+:flash_done
+echo.
 
 echo.
 echo ========================================

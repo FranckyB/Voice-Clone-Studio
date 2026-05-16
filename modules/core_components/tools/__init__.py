@@ -292,7 +292,7 @@ def load_config():
         "datasets_folder": "datasets",
         "temp_folder": "temp",
         "models_folder": "models",
-        "trained_models_folder": "trained_models",
+        "trained_models_folder": "loras",
         "conv_model_type": "Qwen Speakers",
         "conv_model_size": "Large",
         "conv_base_model_size": "Large",
@@ -904,9 +904,9 @@ def build_shared_state(user_config, directories, constants, managers=None, confi
         'main_tabs_component': None,  # Set to gr.Tabs component after creation in main app
 
         # Helper functions
-        'get_trained_models': lambda: get_trained_models_util(directories.get('OUTPUT_DIR').parent / user_config.get("trained_models_folder", "trained_models")),
+        'get_trained_models': lambda: get_trained_models_util(directories.get('OUTPUT_DIR').parent / user_config.get("trained_models_folder", "loras")),
         'get_trained_model_names': lambda: get_trained_model_names_util(
-            directories.get('OUTPUT_DIR').parent / user_config.get("trained_models_folder", "trained_models")
+            directories.get('OUTPUT_DIR').parent / user_config.get("trained_models_folder", "loras")
         ),
         'train_model': lambda folder, speaker_name, ref_audio, batch_size, lr, epochs, save_interval, progress=None: train_model_util(
             folder, speaker_name, ref_audio, batch_size, lr, epochs, save_interval,
@@ -915,11 +915,11 @@ def build_shared_state(user_config, directories, constants, managers=None, confi
             play_completion_beep, progress
         ),
         'get_trained_vibevoice_models': lambda: get_trained_vibevoice_models_util(
-            directories.get('OUTPUT_DIR').parent / user_config.get("trained_models_folder", "trained_models")
+            directories.get('OUTPUT_DIR').parent / user_config.get("trained_models_folder", "loras")
         ),
-        'train_dramabox_model': lambda folder, speaker_name, batch_size, lr, epochs, save_interval, gradient_accumulation, warmup_steps, lora_rank, lora_alpha, lora_dropout, lr_scheduler, base_model, ref_ratio, text_dropout, seed, resume_lora, progress=None: train_dramabox_model_util(
+        'train_dramabox_model': lambda folder, speaker_name, batch_size, lr, epochs, save_interval, gradient_accumulation, gradient_checkpointing, num_workers, warmup_steps, lora_rank, lora_alpha, lora_dropout, lr_scheduler, base_model, ref_ratio, text_dropout, seed, resume_lora, progress=None: train_dramabox_model_util(
             folder, speaker_name, batch_size, lr, epochs,
-            save_interval, gradient_accumulation, warmup_steps,
+            save_interval, gradient_accumulation, gradient_checkpointing, num_workers, warmup_steps,
             lora_rank, lora_alpha, lora_dropout,
             lr_scheduler, base_model, ref_ratio,
             text_dropout, seed, resume_lora,
@@ -1137,7 +1137,7 @@ def run_tool_standalone(ToolClass, port=7860, title="Tool - Standalone", extra_s
 
     print(f"[*] Output: {OUTPUT_DIR}")
     from modules.core_components.ai_models.model_utils import get_trained_models
-    models_dir = project_root / user_config.get("trained_models_folder", "trained_models")
+    models_dir = project_root / user_config.get("trained_models_folder", "loras")
     print(f"[*] Found {len(get_trained_models(models_dir))} trained models")
     print(f"\n✓ {ToolClass.config.name} UI loaded successfully!")
     print(f"[*] Launching on http://127.0.0.1:{port}")

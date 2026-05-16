@@ -519,11 +519,11 @@ def train_vibevoice_model(folder, speaker_name, batch_size, learning_rate,
 
 def train_dramabox_model(folder, speaker_name, batch_size, learning_rate,
                          num_epochs, save_interval,
-                         gradient_accumulation_steps, warmup_steps,
+                         gradient_accumulation_steps, gradient_checkpointing, num_workers, warmup_steps,
                          lora_rank, lora_alpha, lora_dropout,
                          lr_scheduler, base_model, ref_ratio,
                          text_dropout, seed, resume_lora,
-                         user_config, datasets_dir, project_root,
+                         user_config=None, datasets_dir=None, project_root=None,
                          play_completion_beep=None, progress=None):
     """Run DramaBox finetuning via its training script."""
     global _active_training_process, _training_stop_requested
@@ -677,7 +677,7 @@ def train_dramabox_model(folder, speaker_name, batch_size, learning_rate,
         return "Error: Failed to generate speaker_index.txt — no valid audio_latents found."
     speaker_index.write_text("".join(lines), encoding="utf-8")
 
-    trained_models_folder = user_config.get("trained_models_folder", "trained_models")
+    trained_models_folder = user_config.get("trained_models_folder", "loras")
     output_dir = project_root / trained_models_folder / speaker_name.strip()
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -697,6 +697,8 @@ def train_dramabox_model(folder, speaker_name, batch_size, learning_rate,
         "--batch-size", str(max(1, int(batch_size or 1))),
         "--save-every", str(max(50, int(save_interval or 500))),
         "--grad-accum", str(max(1, int(gradient_accumulation_steps or 4))),
+        "--gradient-checkpointing", str(int(gradient_checkpointing) if gradient_checkpointing is not None else 1),
+        "--num-workers", str(max(0, int(num_workers or 2))),
         "--warmup-steps", str(max(0, int(warmup_steps or 0))),
         "--lora-rank", str(max(1, int(lora_rank or 128))),
         "--lora-alpha", str(max(1, int(lora_alpha or 128))),
@@ -728,6 +730,7 @@ def train_dramabox_model(folder, speaker_name, batch_size, learning_rate,
 
     total_steps = int(steps)
     current_progress = 0.0
+    last_step_desc = "Starting DramaBox training..."
     for line in result.stdout:
         if _training_stop_requested:
             break
@@ -744,10 +747,19 @@ def train_dramabox_model(folder, speaker_name, batch_size, learning_rate,
                 loss_val = line.split("loss=")[1].split(" ")[0].rstrip("|").strip()
                 eta_str = ""
                 if "ETA " in line:
-                    eta_str = " | ETA " + line.split("ETA ")[1].split(" ")[0] + "min"
-                progress(current_progress, desc=f"Step {current_step}/{total_steps} | loss={loss_val}{eta_str}")
+                    eta_raw = line.split("ETA ")[1].split(" ")[0]
+                    eta_str = " | ETA " + eta_raw if eta_raw.endswith("min") else " | ETA " + eta_raw + "min"
+                last_step_desc = f"Step {current_step}/{total_steps} | loss={loss_val}{eta_str}"
+                progress(current_progress, desc=last_step_desc)
             except Exception:
                 pass
+        elif "New best:" in line:
+            # Show step progress + new-best on one line (Gradio strips newlines in progress desc)
+            msg = line
+            parts = line.split(" ", 3)
+            if len(parts) == 4 and parts[2] in ("INFO", "WARNING", "ERROR", "DEBUG"):
+                msg = parts[3]
+            progress(current_progress, desc=f"{last_step_desc} | {msg}")
         else:
             # Show all other log lines (model loading, dataset build, etc.)
             # Strip the logging timestamp prefix if present: "2026-01-01 00:00:00,000 INFO msg"

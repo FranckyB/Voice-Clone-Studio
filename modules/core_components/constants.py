@@ -434,7 +434,7 @@ DEFAULT_CONFIG = {
     "datasets_folder": "datasets",
     "temp_folder": "temp",
     "models_folder": "models",
-    "trained_models_folder": "trained_models"
+    "trained_models_folder": "loras"
 }
 
 # ============================================================================
@@ -483,6 +483,8 @@ DRAMABOX_TRAINING_DEFAULTS = {
     "num_epochs": 1000,
     "save_interval": 200,
     "gradient_accumulation": 4,
+    "gradient_checkpointing": 1,
+    "num_workers": 2,
     "warmup_steps": 100,
     "lora_rank": 128,
     "lora_alpha": 128,

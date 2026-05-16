@@ -286,7 +286,7 @@ class ConversationTool(Tool):
         restore_fn, restore_outputs = create_param_restore_handler(components, _user_config, param_map)
 
         def list_trained_loras():
-            trained_models_folder = _user_config.get("trained_models_folder", "trained_models")
+            trained_models_folder = _user_config.get("trained_models_folder", "loras")
             trained_root = OUTPUT_DIR.parent / trained_models_folder
             lora_items = []
             if not trained_root.exists():

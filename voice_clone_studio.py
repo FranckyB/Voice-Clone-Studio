@@ -181,7 +181,7 @@ OUTPUT_DIR = Path(__file__).parent / _user_config.get("output_folder", "output")
 DATASETS_DIR = Path(__file__).parent / _user_config.get("datasets_folder", "datasets")
 TEMP_DIR = Path(__file__).parent / _user_config.get("temp_folder", "temp")
 MODELS_DIR = Path(__file__).parent / _user_config.get("models_folder", "models")
-TRAINED_MODELS_DIR = Path(__file__).parent / _user_config.get("trained_models_folder", "trained_models")
+TRAINED_MODELS_DIR = Path(__file__).parent / _user_config.get("trained_models_folder", "loras")
 
 for dir_path in [SAMPLES_DIR, OUTPUT_DIR, DATASETS_DIR, TEMP_DIR, MODELS_DIR, TRAINED_MODELS_DIR]:
     dir_path.mkdir(exist_ok=True)

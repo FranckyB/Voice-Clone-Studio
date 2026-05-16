@@ -355,7 +355,7 @@ def show_train_help():
         &nbsp;
 
         #### After Training:
-        Your model will be saved in `trained_models/{speaker_name}/`
+        Your model will be saved in `loras/{speaker_name}/`
 
         **Use it with:**
         Voice Presets tab → Trained Models → Select Speaker Name

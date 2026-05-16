@@ -86,6 +86,16 @@ read -t 30 -p "Install DeepFilterNet? (y/N, default N in 30s): " INSTALL_DEEPFIL
 INSTALL_DEEPFILTER=${INSTALL_DEEPFILTER:-N}
 echo ""
 
+echo "========================================="
+echo "Optional: Install Flash Attention 2 for faster inference?"
+echo "Flash Attention 2 provides fast attention for DramaBox training."
+echo "Requires CUDA GPU and a C++ compiler to build from source."
+echo "========================================="
+echo ""
+read -t 30 -p "Install Flash Attention 2? (y/N, default N in 30s): " INSTALL_FLASH
+INSTALL_FLASH=${INSTALL_FLASH:-N}
+echo ""
+
 echo "All questions answered - installing now..."
 echo ""
 
@@ -208,6 +218,24 @@ else
     echo "Skipping Qwen3 ASR installation."
 fi
 
+# Flash Attention 2
+if [[ "$INSTALL_FLASH" =~ ^[Yy]$ ]]; then
+    echo ""
+    echo "Installing Flash Attention 2..."
+    echo "Building from source — this may take several minutes."
+    if pip install flash-attn --no-build-isolation; then
+        echo "Flash Attention 2 installed successfully!"
+    else
+        echo "WARNING: Flash Attention 2 build failed."
+        echo "If you have a prebuilt wheel, install it with:"
+        echo "  pip install path/to/flash_attn-*.whl"
+        echo "Prebuilt wheels may be available at:"
+        echo "  https://huggingface.co/MonsterMMORPG/Wan_GGUF/tree/main"
+    fi
+else
+    echo "Skipping Flash Attention 2 installation."
+fi
+
 # llama.cpp
 if [[ "$INSTALL_LLAMA" =~ ^[Yy]$ ]]; then
     echo ""
@@ -246,17 +274,6 @@ echo "========================================="
 echo "✅ Setup complete!"
 echo "========================================="
 echo ""
-echo "OPTIONAL: Install Flash Attention 2 for better performance"
-echo ""
-echo "Option 1 - Build from source (requires C++ compiler):"
-echo "  pip install flash-attn --no-build-isolation"
-echo ""
-echo "Option 2 - Use prebuilt wheel (faster, no compiler needed):"
-echo "  Download a wheel matching your Python version"
-echo "  Then: pip install downloaded-wheel-file.whl"
-echo ""
-echo "  Possible source for wheels:"
-echo "  https://huggingface.co/MonsterMMORPG/Wan_GGUF/tree/main"
 echo "========================================="
 echo ""
 echo "To run the application:"

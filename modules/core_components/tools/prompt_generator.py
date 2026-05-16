@@ -786,7 +786,7 @@ class PromptManagerTool(Tool):
 
         components = {}
 
-        with gr.TabItem("LLM") as prompt_generator_tab:
+        with gr.TabItem("Prompt Manager") as prompt_generator_tab:
             components['prompt_generator_tab'] = prompt_generator_tab
             with gr.Row():
                 # Left column: prompt editor and saved prompts

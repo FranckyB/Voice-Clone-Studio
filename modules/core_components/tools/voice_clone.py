@@ -51,15 +51,15 @@ class VoiceCloneTool(Tool):
                 with gr.Column(scale=1):
                     gr.Markdown("### Voice Sample")
 
+                    components['clear_sample_btn'] = gr.Button(
+                        "Clear Sample (LoRA Only)", size="sm", variant="secondary"
+                    )
+
                     components['sample_lister'] = FileLister(
                         value=get_sample_choices(),
                         height=200,
                         show_footer=False,
                         interactive=True,
-                    )
-
-                    components['clear_sample_btn'] = gr.Button(
-                        "Clear Sample (LoRA Only)", size="sm", variant="secondary"
                     )
 
                     components['sample_audio'] = gr.Audio(
@@ -189,7 +189,7 @@ class VoiceCloneTool(Tool):
         restore_fn, restore_outputs = create_param_restore_handler(components, _user_config, param_map)
 
         def list_trained_loras():
-            trained_models_folder = _user_config.get("trained_models_folder", "trained_models")
+            trained_models_folder = _user_config.get("trained_models_folder", "loras")
             trained_root = OUTPUT_DIR.parent / trained_models_folder
             lora_items = []
             if not trained_root.exists():

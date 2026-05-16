@@ -157,10 +157,23 @@ class TrainModelTool(Tool):
                                     info="Effective batch size = batch_size * grad_accum"
                                 )
 
+                                components['vv_gradient_checkpointing'] = gr.Checkbox(
+                                    value=bool(vv.get("gradient_checkpointing", 1)),
+                                    label="Gradient Checkpointing",
+                                    info="Saves VRAM at the cost of speed. Disable if you have headroom."
+                                )
+
+                            with gr.Row():
                                 components['vv_warmup_steps'] = gr.Slider(
                                     minimum=0, maximum=1000, value=vv["warmup_steps"], step=10,
                                     label="Warmup Steps",
                                     info="Linearly ramp up LR at the start"
+                                )
+
+                                components['vv_num_workers'] = gr.Slider(
+                                    minimum=0, maximum=8, value=vv.get("num_workers", 2), step=1,
+                                    label="DataLoader Workers",
+                                    info="CPU threads prefetching batches. Try 0 if GPU utilisation is low on Windows"
                                 )
 
                             gr.Markdown("#### LoRA Settings")
@@ -344,6 +357,8 @@ class TrainModelTool(Tool):
                 ('vv_num_epochs', 'num_epochs'),
                 ('vv_save_interval', 'save_interval'),
                 ('vv_gradient_accumulation', 'gradient_accumulation'),
+                ('vv_gradient_checkpointing', 'gradient_checkpointing'),
+                ('vv_num_workers', 'num_workers'),
                 ('vv_warmup_steps', 'warmup_steps'),
                 ('vv_lora_rank', 'lora_rank'),
                 ('vv_lora_alpha', 'lora_alpha'),
@@ -424,7 +439,7 @@ class TrainModelTool(Tool):
         def handle_train_model_input(input_value, model_type, folder, ref_lister,
                                      qwen_batch_size, qwen_lr, qwen_epochs, qwen_save_interval,
                                      vv_batch_size, vv_lr, vv_epochs, vv_save_interval,
-                                     vv_gradient_accumulation, vv_warmup_steps,
+                                     vv_gradient_accumulation, vv_gradient_checkpointing, vv_num_workers, vv_warmup_steps,
                                      vv_lora_rank, vv_lora_alpha, vv_lora_dropout,
                                      vv_lr_scheduler, vv_base_model, vv_ref_ratio,
                                      vv_text_dropout, vv_seed, vv_resume_lora,
@@ -449,7 +464,7 @@ class TrainModelTool(Tool):
             if model_type == "DramaBox":
                 return train_dramabox_model(
                     folder, speaker_name, vv_batch_size, vv_lr, vv_epochs,
-                    vv_save_interval, vv_gradient_accumulation, vv_warmup_steps,
+                    vv_save_interval, vv_gradient_accumulation, 1 if vv_gradient_checkpointing else 0, int(vv_num_workers or 2), vv_warmup_steps,
                     vv_lora_rank, vv_lora_alpha, vv_lora_dropout,
                     vv_lr_scheduler, vv_base_model, vv_ref_ratio,
                     vv_text_dropout, int(vv_seed) if vv_seed is not None else 42,
@@ -486,6 +501,8 @@ class TrainModelTool(Tool):
                 components['vv_save_interval'],
                 # DramaBox-specific
                 components['vv_gradient_accumulation'],
+                components['vv_gradient_checkpointing'],
+                components['vv_num_workers'],
                 components['vv_warmup_steps'],
                 components['vv_lora_rank'],
                 components['vv_lora_alpha'],

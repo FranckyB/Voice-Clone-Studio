@@ -54,6 +54,7 @@ prompts.json
 Qwen/
 .hf_cache/
 modules/models/.cache/
+loras/*
 
 # Jupyter
 .ipynb_checkpoints/

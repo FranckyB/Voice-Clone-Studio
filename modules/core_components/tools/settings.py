@@ -120,6 +120,19 @@ class SettingsTool(Tool):
                             with gr.Column():
 
                                 gr.Markdown("### Model Optimizations")
+                                components['settings_low_cpu_mem'] = gr.Checkbox(
+                                    label="Low CPU Memory Usage (Slower loading time)",
+                                    value=_user_config.get("low_cpu_mem_usage", False),
+                                    info="Reduces CPU RAM usage when loading models."
+                                )
+
+                                components['settings_attention_mechanism'] = gr.Dropdown(
+                                    label="Choose Attention Mechanism",
+                                    choices=["auto", "flash_attention_2", "sdpa", "eager"],
+                                    value=_user_config.get("attention_mechanism", "auto"),
+                                    info="Auto = fastest available. flash_attention_2 (fastest) → sdpa (built-in PyTorch) → eager (always works)"
+                                )
+
                                 components['settings_dramabox_cpu_offload'] = gr.Checkbox(
                                     label="DramaBox CPU Offloading",
                                     value=_user_config.get("dramabox_cpu_offload", False),
@@ -248,7 +261,7 @@ class SettingsTool(Tool):
                             "datasets": "datasets",
                             "temp": "temp",
                             "models": "models",
-                            "trained_models": "trained_models"
+                            "loras": "loras"
                         }
                         components['default_folders'] = default_folders
 
@@ -289,9 +302,9 @@ class SettingsTool(Tool):
 
                             with gr.Column():
                                 components['settings_trained_models_folder'] = gr.Textbox(
-                                    label="Trained Models Folder",
-                                    value=_user_config.get("trained_models_folder", default_folders["trained_models"]),
-                                    info="Folder for your custom trained models"
+                                    label="Trained Loras Folder",
+                                    value=_user_config.get("trained_models_folder", default_folders["loras"]),
+                                    info="Folder for your custom trained Loras"
                                 )
                                 components['reset_trained_models_btn'] = gr.Button("Reset", size="sm")
 
@@ -347,6 +360,18 @@ class SettingsTool(Tool):
         components['settings_dramabox_cpu_offload'].change(
             lambda x: save_preference("dramabox_cpu_offload", x),
             inputs=[components['settings_dramabox_cpu_offload']],
+            outputs=[]
+        )
+
+        components['settings_low_cpu_mem'].change(
+            lambda x: save_preference("low_cpu_mem_usage", x),
+            inputs=[components['settings_low_cpu_mem']],
+            outputs=[]
+        )
+
+        components['settings_attention_mechanism'].change(
+            lambda x: save_preference("attention_mechanism", x),
+            inputs=[components['settings_attention_mechanism']],
             outputs=[]
         )
 
@@ -483,7 +508,7 @@ class SettingsTool(Tool):
         )
 
         components['reset_trained_models_btn'].click(
-            lambda: reset_folder("trained_models"),
+            lambda: reset_folder("loras"),
             outputs=[components['settings_trained_models_folder']]
         )
 
@@ -577,7 +602,7 @@ class SettingsTool(Tool):
                     f"Output: {new_output}",
                     f"Datasets: {new_datasets}",
                     f"Downloaded Models: {new_models}",
-                    f"Trained Models: {new_trained_models}",
+                    f"Trained Loras: {new_trained_models}",
                 ]
                 if llama_cpp_path.strip():
                     status_lines.append(f"llama.cpp: {llama_cpp_path.strip()}")
