@@ -295,6 +295,10 @@ class ConversationTool(Tool):
                 [d for d in trained_root.iterdir() if d.is_dir()],
                 key=lambda d: d.name.lower()
             ):
+                # New naming: slug_dramabox_*.safetensors (periodic + best)
+                for ckpt in sorted(speaker_dir.glob("*_dramabox_*.safetensors"), key=lambda p: p.name, reverse=True):
+                    lora_items.append((f"{speaker_dir.name} / {ckpt.name}", str(ckpt)))
+                # Legacy naming fallback
                 adapter_path = speaker_dir / "adapter_model.safetensors"
                 if adapter_path.exists():
                     lora_items.append((f"{speaker_dir.name} / adapter_model.safetensors", str(adapter_path)))

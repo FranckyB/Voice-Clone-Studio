@@ -40,7 +40,7 @@ class TrainModelTool(Tool):
 
         vv = DRAMABOX_TRAINING_DEFAULTS
 
-        with gr.TabItem("Train Model") as train_tab:
+        with gr.TabItem("Train Model", id="tab_train_model") as train_tab:
             components['train_tab'] = train_tab
             gr.Markdown("Train a custom voice model using DramaBox finetuning")
             with gr.Row():
