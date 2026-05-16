@@ -112,7 +112,7 @@ class VoiceCloneTool(Tool):
                         precision=0,
                     )
 
-                    # Create with hardcoded defaults; saved values are restored on tab.select
+                    # Hardcoded defaults here preserve reset-button behavior; saved values are restored on app.load
                     _db_params = create_dramabox_advanced_params()
                     components['dramabox_params_accordion'] = _db_params['accordion']
                     components['dramabox_negative_prompt'] = _db_params['negative_prompt']
@@ -127,6 +127,12 @@ class VoiceCloneTool(Tool):
                     components['dramabox_rescale_scale'] = _db_params['rescale_scale']
                     components['dramabox_id_guidance_scale'] = _db_params['id_guidance_scale']
                     components['dramabox_no_watermark'] = _db_params['no_watermark']
+
+                    components['split_paragraph'] = gr.Checkbox(
+                        label="Split Audio by Paragraph",
+                        value=False,
+                        info="Generate a separate audio clip for each paragraph (separated by line breaks)"
+                    )
 
                     components['generate_btn'] = gr.Button(
                         "Generate Audio", variant="primary", size="lg"
@@ -188,6 +194,12 @@ class VoiceCloneTool(Tool):
         create_param_restore_handler = shared_state['create_param_restore_handler']
         restore_fn, restore_outputs = create_param_restore_handler(components, _user_config, param_map)
 
+        def _short_lora_label(filename):
+            """Strip .safetensors extension for display."""
+            if filename.endswith(".safetensors"):
+                return filename[:-len(".safetensors")]
+            return filename
+
         def list_trained_loras():
             trained_models_folder = _user_config.get("trained_models_folder", "loras")
             trained_root = OUTPUT_DIR.parent / trained_models_folder
@@ -200,15 +212,15 @@ class VoiceCloneTool(Tool):
             ):
                 # New naming: slug_dramabox_*.safetensors (periodic + best)
                 for ckpt in sorted(speaker_dir.glob("*_dramabox_*.safetensors"), key=lambda p: p.name, reverse=True):
-                    lora_items.append((f"{speaker_dir.name} / {ckpt.name}", str(ckpt)))
+                    lora_items.append((_short_lora_label(ckpt.name), str(ckpt)))
                 # Legacy naming fallback
                 adapter_path = speaker_dir / "adapter_model.safetensors"
                 if adapter_path.exists():
-                    lora_items.append((f"{speaker_dir.name} / adapter_model.safetensors", str(adapter_path)))
+                    lora_items.append((f"{speaker_dir.name}_adapter", str(adapter_path)))
                 for lora_step in sorted(speaker_dir.glob("lora_step_*.safetensors"), key=lambda p: p.name, reverse=True):
-                    lora_items.append((f"{speaker_dir.name} / {lora_step.name}", str(lora_step)))
+                    lora_items.append((_short_lora_label(lora_step.name), str(lora_step)))
                 for best_step in sorted(speaker_dir.glob("best_step_*.safetensors"), key=lambda p: p.name, reverse=True):
-                    lora_items.append((f"{speaker_dir.name} / {best_step.name}", str(best_step)))
+                    lora_items.append((_short_lora_label(best_step.name), str(best_step)))
             return lora_items
 
         def refresh_lora_choices(current_choice):
@@ -230,6 +242,7 @@ class VoiceCloneTool(Tool):
         def generate_audio_handler(
             lister_value, text_to_generate, seed,
             lora_selection, lora_path_map,
+            split_paragraph,
             db_negative_prompt, db_ref_duration, db_gen_duration, db_steps,
             db_sampler, db_speed, db_duration_multiplier,
             db_cfg_scale, db_stg_scale, db_rescale_scale,
@@ -304,15 +317,45 @@ class VoiceCloneTool(Tool):
 
                 progress(0.3, desc="Running DramaBox inference...")
                 cpu_offload = _user_config.get("dramabox_cpu_offload", False)
-                tts_manager.generate_dramabox_to_file(
-                    prompt=text_to_generate.strip(),
-                    output_path=str(temp_path),
-                    voice_sample=str(sample_wav) if sample_wav else None,
-                    seed=int(actual_seed),
-                    lora_path=str(lora_path) if lora_path else None,
-                    cpu_offload=cpu_offload,
-                    dramabox_params=dramabox_params,
-                )
+
+                paragraphs = [p.strip() for p in text_to_generate.split("\n") if p.strip()]
+                if split_paragraph and len(paragraphs) > 1:
+                    import soundfile as _sf
+                    import numpy as _np
+                    seg_paths = []
+                    for p_idx, para in enumerate(paragraphs):
+                        progress((0.3 + 0.55 * (p_idx / len(paragraphs))), desc=f"Generating paragraph {p_idx + 1}/{len(paragraphs)}...")
+                        seg_path = TEMP_DIR / f"{stem}_para{p_idx:03d}.wav"
+                        tts_manager.generate_dramabox_to_file(
+                            prompt=para,
+                            output_path=str(seg_path),
+                            voice_sample=str(sample_wav) if sample_wav else None,
+                            seed=int(actual_seed) + p_idx,
+                            lora_path=str(lora_path) if lora_path else None,
+                            cpu_offload=cpu_offload,
+                            dramabox_params=dramabox_params,
+                        )
+                        seg_paths.append(seg_path)
+                    # Concatenate with 0.3s pause
+                    frames = []
+                    for sp in seg_paths:
+                        d, sr = _sf.read(str(sp))
+                        frames.append(d)
+                        if sr and d is not None:
+                            pause = _np.zeros((int(sr * 0.3),) + d.shape[1:], dtype=_np.float32)
+                            frames.append(pause)
+                    combined = _np.concatenate(frames).astype(_np.float32)
+                    _sf.write(str(temp_path), combined, sr)
+                else:
+                    tts_manager.generate_dramabox_to_file(
+                        prompt=text_to_generate.strip(),
+                        output_path=str(temp_path),
+                        voice_sample=str(sample_wav) if sample_wav else None,
+                        seed=int(actual_seed),
+                        lora_path=str(lora_path) if lora_path else None,
+                        cpu_offload=cpu_offload,
+                        dramabox_params=dramabox_params,
+                    )
 
                 progress(0.85, desc="Finalizing output...")
                 metadata_lines = [
@@ -408,6 +451,12 @@ class VoiceCloneTool(Tool):
             outputs=restore_outputs
         )
 
+        shared_state['app'].load(
+            restore_fn,
+            inputs=[],
+            outputs=restore_outputs
+        )
+
         components['generate_btn'].click(
             generate_audio_handler,
             inputs=[
@@ -416,6 +465,7 @@ class VoiceCloneTool(Tool):
                 components['seed_input'],
                 components['lora_dropdown'],
                 components['lora_path_map'],
+                components['split_paragraph'],
                 components['dramabox_negative_prompt'],
                 components['dramabox_ref_duration'],
                 components['dramabox_gen_duration'],

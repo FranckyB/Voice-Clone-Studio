@@ -88,18 +88,23 @@ def finalize_conversation_output(segment_paths, pause_secs, TEMP_DIR, OUTPUT_DIR
     if not segment_paths:
         raise RuntimeError("No audio segments to concatenate.")
 
-    SAMPLE_RATE = 24000
+    SAMPLE_RATE = 48000
+    CHANNELS = 2
     frames_list = []
     for path in segment_paths:
         data, sr = sf.read(str(path))
         if sr != SAMPLE_RATE:
             import librosa
-            data = librosa.resample(data, orig_sr=sr, target_sr=SAMPLE_RATE)
-        if data.ndim > 1:
-            data = data[:, 0]
+            if data.ndim > 1:
+                data = data.T  # (channels, samples) for librosa
+                data = np.stack([librosa.resample(ch, orig_sr=sr, target_sr=SAMPLE_RATE) for ch in data], axis=1)
+            else:
+                data = librosa.resample(data, orig_sr=sr, target_sr=SAMPLE_RATE)
+        if data.ndim == 1:
+            data = np.stack([data, data], axis=1)  # mono → stereo
         frames_list.append(data)
         if pause_secs > 0:
-            pause_frames = np.zeros(int(SAMPLE_RATE * pause_secs), dtype=np.float32)
+            pause_frames = np.zeros((int(SAMPLE_RATE * pause_secs), CHANNELS), dtype=np.float32)
             frames_list.append(pause_frames)
 
     combined = np.concatenate(frames_list).astype(np.float32)
@@ -136,11 +141,10 @@ class ConversationTool(Tool):
         _user_config = shared_state['_user_config']
         create_dramabox_advanced_params = shared_state['create_dramabox_advanced_params']
 
-        voice_choices = ["(None)"] + get_sample_choices()
 
         with gr.TabItem("Conversation", id="tab_conversation") as conversation_tab:
             components['conversation_tab'] = conversation_tab
-            gr.Markdown("Generate multi-speaker conversations using DramaBox. Label each line with <code>[1]:</code>, <code>[2]:</code> etc.")
+            gr.Markdown("Generate multi-speaker conversations using DramaBox with LoRAs. Label each line with <code>[1]:</code>, <code>[2]:</code> etc. Assign a LoRA to each active speaker.")
 
             with gr.Row():
                 # Left column — script + voice assignment
@@ -156,45 +160,25 @@ class ConversationTool(Tool):
                     import modules.core_components.prompt_hub as _prompt_hub
                     components.update(_prompt_hub.create_prompt_loader("conv", "Saved Prompts"))
 
-                    gr.Markdown("### Voice Assignment")
+                    gr.Markdown("### Speaker LoRA Assignment")
                     with gr.Row():
-                        with gr.Column():
-                            components['conv_voice_1'] = gr.Dropdown(
-                                choices=voice_choices, value="(None)",
-                                label="Speaker 1 Voice", interactive=True
-                            )
-                            components['conv_lora_dropdown_1'] = gr.Dropdown(
-                                choices=["(None)"], value="(None)",
-                                label="Speaker 1 LoRA", interactive=True
-                            )
-                        with gr.Column():
-                            components['conv_voice_2'] = gr.Dropdown(
-                                choices=voice_choices, value="(None)",
-                                label="Speaker 2 Voice", interactive=True
-                            )
-                            components['conv_lora_dropdown_2'] = gr.Dropdown(
-                                choices=["(None)"], value="(None)",
-                                label="Speaker 2 LoRA", interactive=True
-                            )
+                        components['conv_lora_dropdown_1'] = gr.Dropdown(
+                            choices=["(None)"], value="(None)",
+                            label="Speaker 1 LoRA", interactive=True
+                        )
+                        components['conv_lora_dropdown_2'] = gr.Dropdown(
+                            choices=["(None)"], value="(None)",
+                            label="Speaker 2 LoRA", interactive=True
+                        )
                     with gr.Row():
-                        with gr.Column():
-                            components['conv_voice_3'] = gr.Dropdown(
-                                choices=voice_choices, value="(None)",
-                                label="Speaker 3 Voice", interactive=True
-                            )
-                            components['conv_lora_dropdown_3'] = gr.Dropdown(
-                                choices=["(None)"], value="(None)",
-                                label="Speaker 3 LoRA", interactive=True
-                            )
-                        with gr.Column():
-                            components['conv_voice_4'] = gr.Dropdown(
-                                choices=voice_choices, value="(None)",
-                                label="Speaker 4 Voice", interactive=True
-                            )
-                            components['conv_lora_dropdown_4'] = gr.Dropdown(
-                                choices=["(None)"], value="(None)",
-                                label="Speaker 4 LoRA", interactive=True
-                            )
+                        components['conv_lora_dropdown_3'] = gr.Dropdown(
+                            choices=["(None)"], value="(None)",
+                            label="Speaker 3 LoRA", interactive=True
+                        )
+                        components['conv_lora_dropdown_4'] = gr.Dropdown(
+                            choices=["(None)"], value="(None)",
+                            label="Speaker 4 LoRA", interactive=True
+                        )
                     components['conv_lora_path_map'] = gr.State(value={})
 
                 # Right column — DramaBox settings + generate
@@ -210,7 +194,7 @@ class ConversationTool(Tool):
                         minimum=0.0, maximum=3.0, step=0.05, value=0.3
                     )
 
-                    # Create with hardcoded defaults; saved values are restored on tab.select
+                    # Hardcoded defaults here preserve reset-button behavior; saved values are restored on app.load
                     _db_params = create_dramabox_advanced_params()
                     components['db_conv_accordion'] = _db_params['accordion']
                     components['db_conv_negative_prompt'] = _db_params['negative_prompt']
@@ -285,6 +269,11 @@ class ConversationTool(Tool):
         create_param_restore_handler = shared_state['create_param_restore_handler']
         restore_fn, restore_outputs = create_param_restore_handler(components, _user_config, param_map)
 
+        def _short_lora_label(filename):
+            if filename.endswith(".safetensors"):
+                return filename[:-len(".safetensors")]
+            return filename
+
         def list_trained_loras():
             trained_models_folder = _user_config.get("trained_models_folder", "loras")
             trained_root = OUTPUT_DIR.parent / trained_models_folder
@@ -297,15 +286,15 @@ class ConversationTool(Tool):
             ):
                 # New naming: slug_dramabox_*.safetensors (periodic + best)
                 for ckpt in sorted(speaker_dir.glob("*_dramabox_*.safetensors"), key=lambda p: p.name, reverse=True):
-                    lora_items.append((f"{speaker_dir.name} / {ckpt.name}", str(ckpt)))
+                    lora_items.append((_short_lora_label(ckpt.name), str(ckpt)))
                 # Legacy naming fallback
                 adapter_path = speaker_dir / "adapter_model.safetensors"
                 if adapter_path.exists():
-                    lora_items.append((f"{speaker_dir.name} / adapter_model.safetensors", str(adapter_path)))
+                    lora_items.append((f"{speaker_dir.name}_adapter", str(adapter_path)))
                 for lora_step in sorted(speaker_dir.glob("lora_step_*.safetensors"), key=lambda p: p.name, reverse=True):
-                    lora_items.append((f"{speaker_dir.name} / {lora_step.name}", str(lora_step)))
+                    lora_items.append((_short_lora_label(lora_step.name), str(lora_step)))
                 for best_step in sorted(speaker_dir.glob("best_step_*.safetensors"), key=lambda p: p.name, reverse=True):
-                    lora_items.append((f"{speaker_dir.name} / {best_step.name}", str(best_step)))
+                    lora_items.append((_short_lora_label(best_step.name), str(best_step)))
             return lora_items
 
         def refresh_all_lora_dropdowns(c1, c2, c3, c4):
@@ -322,18 +311,8 @@ class ConversationTool(Tool):
                 lora_map,
             )
 
-        def refresh_voice_choices():
-            new_choices = ["(None)"] + get_sample_choices()
-            return (
-                gr.update(choices=new_choices),
-                gr.update(choices=new_choices),
-                gr.update(choices=new_choices),
-                gr.update(choices=new_choices),
-            )
-
         def generate_dramabox_conversation_handler(
             script, seed,
-            voice_1, voice_2, voice_3, voice_4,
             lora_1, lora_2, lora_3, lora_4, lora_path_map,
             pause_linebreak,
             db_negative_prompt, db_ref_duration, db_gen_duration, db_steps,
@@ -349,10 +328,6 @@ class ConversationTool(Tool):
             lines = [l for l in processed.split("\n") if l.strip()]
             if not lines:
                 return None, "Script has no speakable lines after processing.", "", gr.update()
-
-            voice_samples = prepare_voice_samples_dict(
-                get_available_samples, voice_1, voice_2, voice_3, voice_4
-            )
 
             lora_selections = [lora_1, lora_2, lora_3, lora_4]
             lora_paths = {}
@@ -421,7 +396,6 @@ class ConversationTool(Tool):
 
                     progress((idx + 1) / len(lines), desc=f"Generating line {idx + 1}/{len(lines)} (Speaker {speaker_idx})...")
 
-                    wav_path = voice_samples.get(speaker_idx)
                     lora_path = lora_paths.get(speaker_idx)
 
                     seg_name = f"conv_seg_{idx:04d}.wav"
@@ -430,7 +404,7 @@ class ConversationTool(Tool):
                     tts_manager.generate_dramabox_to_file(
                         prompt=text_clean,
                         output_path=str(seg_path),
-                        voice_sample=str(wav_path) if wav_path else None,
+                        voice_sample=None,
                         seed=actual_seed + idx,
                         lora_path=str(lora_path) if lora_path else None,
                         cpu_offload=cpu_offload,
@@ -448,10 +422,6 @@ class ConversationTool(Tool):
                     f"Engine: DramaBox",
                     f"Seed: {actual_seed}",
                     f"Segments: {len(segment_paths)}",
-                    "Speakers: " + ", ".join(
-                        "{}:{}".format(i, v or "(None)")
-                        for i, v in enumerate([voice_1, voice_2, voice_3, voice_4], 1)
-                    ),
                     f"Script: {' '.join(script.split())[:200]}",
                 ]
                 metadata_out = "\n".join(metadata_lines)
@@ -479,18 +449,7 @@ class ConversationTool(Tool):
                 traceback.print_exc()
                 return None, f"❌ Error generating conversation: {str(e)}", "", gr.update()
 
-        # Tab select — refresh samples and LoRAs
-        components['conversation_tab'].select(
-            refresh_voice_choices,
-            inputs=[],
-            outputs=[
-                components['conv_voice_1'],
-                components['conv_voice_2'],
-                components['conv_voice_3'],
-                components['conv_voice_4'],
-            ]
-        )
-
+        # Tab select — refresh LoRAs
         components['conversation_tab'].select(
             refresh_all_lora_dropdowns,
             inputs=[
@@ -514,15 +473,17 @@ class ConversationTool(Tool):
             outputs=restore_outputs
         )
 
+        shared_state['app'].load(
+            restore_fn,
+            inputs=[],
+            outputs=restore_outputs
+        )
+
         components['generate_btn'].click(
             generate_dramabox_conversation_handler,
             inputs=[
                 components['conv_script'],
                 components['conv_seed'],
-                components['conv_voice_1'],
-                components['conv_voice_2'],
-                components['conv_voice_3'],
-                components['conv_voice_4'],
                 components['conv_lora_dropdown_1'],
                 components['conv_lora_dropdown_2'],
                 components['conv_lora_dropdown_3'],

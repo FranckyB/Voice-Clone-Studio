@@ -141,6 +141,18 @@ PROMPT_TARGETS = {
             "User instruction:\n{instruction}"
         ),
     },
+    "conversation.script": {
+        "label": "Conversation: Prompt",
+        "tool": "Conversation",
+        "tab_id": "tab_conversation",
+        "component_key": "conversation_script",
+        "default_system_preset": "Conversation",
+        "template": (
+            "Create a conversation script strictly in [n]: (emotion) format. "
+            "No narration, no stage directions, no markdown.\n\n"
+            "User instruction:\n{instruction}"
+        ),
+    },
     "voice_design.reference": {
         "label": "Voice Design: Prompt",
         "tool": "Voice Design",
@@ -163,18 +175,6 @@ PROMPT_TARGETS = {
             "Write voice design instructions as one structured object. "
             "Fill all fields with specific values when possible. "
             "Return only the object, no markdown.\n\n"
-            "User instruction:\n{instruction}"
-        ),
-    },
-    "conversation.script": {
-        "label": "Conversation: Prompt",
-        "tool": "Conversation",
-        "tab_id": "tab_conversation",
-        "component_key": "conversation_script",
-        "default_system_preset": "Conversation",
-        "template": (
-            "Create a conversation script strictly in [n]: (emotion) format. "
-            "No narration, no stage directions, no markdown.\n\n"
             "User instruction:\n{instruction}"
         ),
     },
