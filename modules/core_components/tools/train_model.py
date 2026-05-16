@@ -82,6 +82,32 @@ class TrainModelTool(Tool):
                         components['start_training_btn'] = gr.Button("Start Training", variant="primary", size="lg")
                         components['stop_training_btn'] = gr.Button("Stop Training", variant="stop", size="lg", interactive=False)
 
+                    with gr.Accordion("Convert LoRA for LTX Inference", open=False):
+                        gr.Markdown(
+                            "Convert a trained DramaBox LoRA from PEFT format to the LTX-compatible format "
+                            "expected by the inference pipeline. Training auto-converts on completion — "
+                            "use this to manually convert existing checkpoints."
+                        )
+                        with gr.Column():
+                            components['convert_lora_input'] = gr.Textbox(
+                                label="LoRA file path",
+                                placeholder="e.g. trained_models/MyVoice/lora_best_00100.safetensors",
+                                scale=4
+                            )
+                            components['convert_lora_btn'] = gr.Button("Convert", variant="primary", scale=1)
+
+                    with gr.Row():
+                        train_quick_guide = dedent("""\
+                            **Quick Guide:**
+                            1. Select dataset folder
+                            2. Configure parameters as needed
+                            3. Start training & Enter Name
+                        """)
+                        gr.HTML(
+                            value=format_help_html(train_quick_guide),
+                            container=True,
+                            padding=True)
+
                 # Right column - Training configuration
                 with gr.Column(scale=1):
                     gr.Markdown("### Training Configuration")
@@ -238,36 +264,10 @@ class TrainModelTool(Tool):
 
                     components['training_status'] = gr.Textbox(
                         label="Status",
-                        lines=3,
+                        lines=6,
                         max_lines=20,
                         interactive=False
                     )
-
-            with gr.Accordion("Convert LoRA for LTX Inference", open=False):
-                gr.Markdown(
-                    "Convert a trained DramaBox LoRA from PEFT format to the LTX-compatible format "
-                    "expected by the inference pipeline. Training auto-converts on completion — "
-                    "use this to manually convert existing checkpoints."
-                )
-                with gr.Column():
-                    components['convert_lora_input'] = gr.Textbox(
-                        label="LoRA file path",
-                        placeholder="e.g. trained_models/MyVoice/lora_best_00100.safetensors",
-                        scale=4
-                    )
-                    components['convert_lora_btn'] = gr.Button("Convert", variant="primary", scale=1)
-
-            with gr.Row():
-                train_quick_guide = dedent("""\
-                    **Quick Guide:**
-                    1. Select dataset folder
-                    2. Configure parameters as needed
-                    3. Start training & Enter Name
-                """)
-                gr.HTML(
-                    value=format_help_html(train_quick_guide),
-                    container=True,
-                    padding=True)
 
 
         return components
