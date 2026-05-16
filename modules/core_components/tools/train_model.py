@@ -9,8 +9,7 @@ from textwrap import dedent
 from gradio_filelister import FileLister
 from modules.core_components.tool_base import Tool, ToolConfig
 from modules.core_components.constants import (
-    QWEN_TRAINING_DEFAULTS,
-    VIBEVOICE_TRAINING_DEFAULTS,
+    DRAMABOX_TRAINING_DEFAULTS,
 )
 
 
@@ -39,26 +38,17 @@ class TrainModelTool(Tool):
         get_dataset_folders = shared_state['get_dataset_folders']
         _user_config = shared_state['_user_config']
 
-        saved_model_type = _user_config.get("train_model_type", "Qwen3")
-        is_qwen = saved_model_type == "Qwen3"
-
-        q = QWEN_TRAINING_DEFAULTS
-        vv = VIBEVOICE_TRAINING_DEFAULTS
+        vv = DRAMABOX_TRAINING_DEFAULTS
 
         with gr.TabItem("Train Model") as train_tab:
             components['train_tab'] = train_tab
-            gr.Markdown("Train a custom voice model using your finetuning dataset")
+            gr.Markdown("Train a custom voice model using DramaBox finetuning")
             with gr.Row():
                 # Left column - Dataset selection
                 with gr.Column(scale=1):
                     gr.Markdown("### Dataset Selection")
 
-                    components['model_type_radio'] = gr.Radio(
-                        choices=["Qwen3", "VibeVoice"],
-                        value=saved_model_type,
-                        label="Model Type",
-                        info="Select training engine"
-                    )
+                    components['model_type_radio'] = gr.State(value="DramaBox")
 
                     components['train_folder_dropdown'] = gr.Dropdown(
                         choices=["(Select Dataset)"] + get_dataset_folders(),
@@ -70,8 +60,8 @@ class TrainModelTool(Tool):
 
                     components['refresh_train_folder_btn'] = gr.Button("Refresh Datasets", size="sm", visible=False)
 
-                    # Qwen3: needs reference audio selection
-                    with gr.Group(visible=is_qwen) as qwen_ref_section:
+                    # Legacy Qwen section kept hidden in this build
+                    with gr.Group(visible=False) as qwen_ref_section:
                         components['qwen_ref_section'] = qwen_ref_section
 
                         components['ref_audio_lister'] = FileLister(
@@ -92,40 +82,16 @@ class TrainModelTool(Tool):
                         components['start_training_btn'] = gr.Button("Start Training", variant="primary", size="lg")
                         components['stop_training_btn'] = gr.Button("Stop Training", variant="stop", size="lg", interactive=False)
 
-                    train_quick_guide = dedent("""\
-                        **Quick Guide:**
-                        1. Select model type (Qwen3 or VibeVoice)
-                        2. Select dataset folder
-                        3. (Qwen3 only) Select a reference audio file from the dataset
-                        4. Configure parameters as needed (optional)
-                        5. Start training & Enter Name (defaults work well for most cases)
-
-                        *See Help Guide tab -> Train Model for detailed instructions*
-                    """)
-                    gr.HTML(
-                        value=format_help_html(train_quick_guide),
-                        container=True,
-                        padding=True)
-
                 # Right column - Training configuration
                 with gr.Column(scale=1):
                     gr.Markdown("### Training Configuration")
 
-                    saved_vv_base = _user_config.get("vv_base_model_size", "1.5B")
-                    with gr.Group(visible=not is_qwen) as vv_base_model_section:
-                        components['vv_base_model_section'] = vv_base_model_section
-                        components['vv_base_model_size'] = gr.Radio(
-                            choices=["1.5B", "7B"],
-                            value=saved_vv_base,
-                            label="Base Model",
-                            info="7B produces higher quality but requires more VRAM"
-                        )
-
                     with gr.Accordion("Training Settings", open=False) as train_accordion:
                         components['train_accordion'] = train_accordion
 
-                        # --- Qwen3 training parameters ---
-                        with gr.Group(visible=is_qwen) as qwen_params_section:
+                        # Legacy Qwen section kept hidden in this build
+                        q = {"batch_size": 1, "learning_rate": 3e-5, "num_epochs": 10, "save_interval": 1}
+                        with gr.Group(visible=False) as qwen_params_section:
                             components['qwen_params_section'] = qwen_params_section
 
                             with gr.Row():
@@ -154,13 +120,13 @@ class TrainModelTool(Tool):
                                     info="Save checkpoint every N epochs (0 = no intermediate saves)"
                                 )
 
-                        # --- VibeVoice training parameters ---
-                        with gr.Group(visible=not is_qwen) as vv_params_section:
+                        # --- DramaBox training parameters ---
+                        with gr.Group(visible=True) as vv_params_section:
                             components['vv_params_section'] = vv_params_section
 
                             with gr.Row():
                                 components['vv_batch_size'] = gr.Slider(
-                                    minimum=1, maximum=10, value=vv["batch_size"], step=1,
+                                    minimum=1, maximum=16, value=vv["batch_size"], step=1,
                                     label="Batch Size",
                                     info="Reduce if you get out of memory errors"
                                 )
@@ -168,74 +134,93 @@ class TrainModelTool(Tool):
                                 components['vv_learning_rate'] = gr.Slider(
                                     minimum=1e-6, maximum=1e-3, value=vv["learning_rate"],
                                     label="Learning Rate",
-                                    info="Default: 5e-5"
+                                    info="Default: 3e-5"
                                 )
 
                             with gr.Row():
                                 components['vv_num_epochs'] = gr.Slider(
-                                    minimum=1, maximum=100, value=vv["num_epochs"], step=1,
-                                    label="Number of Epochs",
-                                    info="How many times to train on the full dataset"
+                                    minimum=0, maximum=6000, value=vv["num_epochs"], step=100,
+                                    label="Steps",
+                                    info="Total number of training steps"
                                 )
 
                                 components['vv_save_interval'] = gr.Slider(
-                                    minimum=0, maximum=10, value=vv["save_interval"], step=1,
-                                    label="Save Interval (Epochs)",
-                                    info="Save checkpoint every N epochs (0 = no intermediate saves)"
-                                )
-
-                            gr.Markdown("#### VibeVoice Advanced")
-
-                            with gr.Row():
-                                components['vv_ddpm_batch_mul'] = gr.Slider(
-                                    minimum=1, maximum=16, value=vv["ddpm_batch_mul"], step=1,
-                                    label="DDPM Batch Multiplier",
-                                    info="Repeat diffusion samples per batch (4 recommended)"
-                                )
-
-                                components['vv_diffusion_loss_weight'] = gr.Slider(
-                                    minimum=0.0, maximum=5.0, value=vv["diffusion_loss_weight"], step=0.1,
-                                    label="Diffusion Loss Weight",
-                                    info="Weight for diffusion head loss"
-                                )
-
-                            with gr.Row():
-                                components['vv_ce_loss_weight'] = gr.Slider(
-                                    minimum=0.0, maximum=2.0, value=vv["ce_loss_weight"], step=0.01,
-                                    label="CE Loss Weight",
-                                    info="Weight for cross-entropy loss"
-                                )
-
-                                components['vv_voice_prompt_drop'] = gr.Slider(
-                                    minimum=0.0, maximum=1.0, value=vv["voice_prompt_drop"], step=0.1,
-                                    label="Voice Prompt Drop Rate",
-                                    info="1.0 = drop all prompts (single-speaker). 0.0 = keep all."
+                                    minimum=100, maximum=5000, value=vv["save_interval"], step=100,
+                                    label="Save Every N Steps",
+                                    info="Save checkpoint every N steps"
                                 )
 
                             with gr.Row():
                                 components['vv_gradient_accumulation'] = gr.Slider(
                                     minimum=1, maximum=32, value=vv["gradient_accumulation"], step=1,
-                                    label="Gradient Accumulation Steps",
-                                    info="Effective batch size = batch_size * gradient_accumulation"
+                                    label="Gradient Accumulation",
+                                    info="Effective batch size = batch_size * grad_accum"
                                 )
 
                                 components['vv_warmup_steps'] = gr.Slider(
-                                    minimum=0, maximum=500, value=vv["warmup_steps"], step=1,
+                                    minimum=0, maximum=1000, value=vv["warmup_steps"], step=10,
                                     label="Warmup Steps",
-                                    info="Linearly ramp up LR (keep low for small datasets)"
+                                    info="Linearly ramp up LR at the start"
+                                )
+
+                            gr.Markdown("#### LoRA Settings")
+
+                            with gr.Row():
+                                components['vv_lora_rank'] = gr.Slider(
+                                    minimum=16, maximum=256, value=vv["lora_rank"], step=16,
+                                    label="LoRA Rank",
+                                    info="Higher = more capacity, more VRAM"
+                                )
+
+                                components['vv_lora_alpha'] = gr.Slider(
+                                    minimum=16, maximum=256, value=vv["lora_alpha"], step=16,
+                                    label="LoRA Alpha",
+                                    info="Scaling factor; typically equals rank"
                                 )
 
                             with gr.Row():
-                                components['vv_train_diffusion_head'] = gr.Checkbox(
-                                    value=vv["train_diffusion_head"],
-                                    label="Train Diffusion Head (default: True)",
-                                    info="Full fine-tune of the diffusion prediction head"
+                                components['vv_lora_dropout'] = gr.Slider(
+                                    minimum=0.0, maximum=0.5, value=vv["lora_dropout"], step=0.05,
+                                    label="LoRA Dropout",
+                                    info="Regularisation (0 = off)"
                                 )
 
-                                components['vv_ema_enabled'] = gr.Checkbox(
-                                    value=vv["ema_enabled"],
-                                    label="EMA (default: On)",
-                                    info="Smooths diffusion head weights during training (decay 0.99)"
+                                components['vv_lr_scheduler'] = gr.Radio(
+                                    choices=["cosine", "linear", "constant"],
+                                    value=vv["lr_scheduler"],
+                                    label="LR Scheduler"
+                                )
+
+                            gr.Markdown("#### Advanced")
+
+                            with gr.Row():
+                                components['vv_base_model'] = gr.State(value="dev")
+
+                                components['vv_seed'] = gr.Number(
+                                    value=vv["seed"], precision=0,
+                                    label="Seed",
+                                    info="Random seed for reproducibility"
+                                )
+
+                            with gr.Row():
+                                components['vv_ref_ratio'] = gr.Slider(
+                                    minimum=0.1, maximum=0.9, value=vv["ref_ratio"], step=0.05,
+                                    label="Ref Ratio",
+                                    info="Fraction of sequence used as reference audio"
+                                )
+
+                                components['vv_text_dropout'] = gr.Slider(
+                                    minimum=0.0, maximum=0.5, value=vv["text_dropout"], step=0.05,
+                                    label="Text Dropout",
+                                    info="Drop text conditioning during training (CFG training)"
+                                )
+
+                            with gr.Row():
+                                components['vv_resume_lora'] = gr.Textbox(
+                                    value=vv["resume_lora"],
+                                    label="Resume from LoRA checkpoint (optional)",
+                                    placeholder="Path to .safetensors checkpoint",
+                                    info="Leave blank to start fresh"
                                 )
 
                     components['training_status'] = gr.Textbox(
@@ -245,17 +230,46 @@ class TrainModelTool(Tool):
                         interactive=False
                     )
 
+            with gr.Accordion("Convert LoRA for LTX Inference", open=False):
+                gr.Markdown(
+                    "Convert a trained DramaBox LoRA from PEFT format to the LTX-compatible format "
+                    "expected by the inference pipeline. Training auto-converts on completion — "
+                    "use this to manually convert existing checkpoints."
+                )
+                with gr.Column():
+                    components['convert_lora_input'] = gr.Textbox(
+                        label="LoRA file path",
+                        placeholder="e.g. trained_models/MyVoice/lora_best_00100.safetensors",
+                        scale=4
+                    )
+                    components['convert_lora_btn'] = gr.Button("Convert", variant="primary", scale=1)
+
+            with gr.Row():
+                train_quick_guide = dedent("""\
+                    **Quick Guide:**
+                    1. Select dataset folder
+                    2. Configure parameters as needed
+                    3. Start training & Enter Name
+                """)
+                gr.HTML(
+                    value=format_help_html(train_quick_guide),
+                    container=True,
+                    padding=True)
+
+
         return components
 
     @classmethod
     def setup_events(cls, components, shared_state):
         """Wire up Train Model tab events."""
 
+        convert_dramabox_lora_to_ltx = shared_state['convert_dramabox_lora_to_ltx']
+
         get_dataset_files = shared_state['get_dataset_files']
         get_dataset_folders = shared_state['get_dataset_folders']
         get_trained_model_names = shared_state['get_trained_model_names']
         train_model = shared_state['train_model']
-        train_vibevoice_model = shared_state['train_vibevoice_model']
+        train_dramabox_model = shared_state['train_dramabox_model']
         stop_training = shared_state['stop_training']
         tts_manager = shared_state.get('tts_manager')
         asr_manager = shared_state.get('asr_manager')
@@ -276,27 +290,7 @@ class TrainModelTool(Tool):
                 return selected[0]
             return None
 
-        # --- Model type toggle: show/hide sections ---
-        def toggle_model_type(model_type):
-            """Toggle visibility of Qwen3 vs VibeVoice specific sections."""
-            is_qwen = model_type == "Qwen3"
-            return (
-                gr.update(visible=is_qwen),      # qwen_ref_section
-                gr.update(visible=is_qwen),      # qwen_params_section
-                gr.update(visible=not is_qwen),  # vv_params_section
-                gr.update(visible=not is_qwen),  # vv_base_model_section
-            )
 
-        components['model_type_radio'].change(
-            toggle_model_type,
-            inputs=[components['model_type_radio']],
-            outputs=[
-                components['qwen_ref_section'],
-                components['qwen_params_section'],
-                components['vv_params_section'],
-                components['vv_base_model_section'],
-            ]
-        )
 
         # --- Folder change: update ref audio lister ---
         def update_ref_audio_lister(folder):
@@ -342,41 +336,22 @@ class TrainModelTool(Tool):
         )
 
         # --- Settings persistence (same pattern as voice_clone) ---
-        # Save model type on change
-        components['model_type_radio'].change(
-            lambda x: save_preference("train_model_type", x),
-            inputs=[components['model_type_radio']],
-            outputs=[]
-        )
-
-        # Save VV base model size on change
-        components['vv_base_model_size'].change(
-            lambda x: save_preference("vv_base_model_size", x),
-            inputs=[components['vv_base_model_size']],
-            outputs=[]
-        )
-
         # Auto-save & restore training parameters per engine
         param_map = {
-            'training_qwen': [
-                ('qwen_batch_size', 'batch_size'),
-                ('qwen_learning_rate', 'learning_rate'),
-                ('qwen_num_epochs', 'num_epochs'),
-                ('qwen_save_interval', 'save_interval'),
-            ],
             'training_vv': [
                 ('vv_batch_size', 'batch_size'),
                 ('vv_learning_rate', 'learning_rate'),
                 ('vv_num_epochs', 'num_epochs'),
                 ('vv_save_interval', 'save_interval'),
-                ('vv_ddpm_batch_mul', 'ddpm_batch_mul'),
-                ('vv_diffusion_loss_weight', 'diffusion_loss_weight'),
-                ('vv_ce_loss_weight', 'ce_loss_weight'),
-                ('vv_voice_prompt_drop', 'voice_prompt_drop'),
-                ('vv_train_diffusion_head', 'train_diffusion_head'),
                 ('vv_gradient_accumulation', 'gradient_accumulation'),
                 ('vv_warmup_steps', 'warmup_steps'),
-                ('vv_ema_enabled', 'ema_enabled'),
+                ('vv_lora_rank', 'lora_rank'),
+                ('vv_lora_alpha', 'lora_alpha'),
+                ('vv_lora_dropout', 'lora_dropout'),
+                ('vv_lr_scheduler', 'lr_scheduler'),
+                ('vv_ref_ratio', 'ref_ratio'),
+                ('vv_text_dropout', 'text_dropout'),
+                ('vv_seed', 'seed'),
             ],
         }
 
@@ -393,11 +368,11 @@ class TrainModelTool(Tool):
         # Hidden JSON to pass existing model names to JS for validation
         components['existing_models_json'] = gr.JSON(value=[], visible=False)
         # Hidden state to pass model type to modal handler
-        components['train_model_type_state'] = gr.State(value="Qwen3")
+        components['train_model_type_state'] = gr.State(value="DramaBox")
 
-        def fetch_existing_models_and_type(model_type):
-            """Fetch current model list and model type before opening modal."""
-            return get_trained_model_names(), model_type
+        def fetch_existing_models_and_type():
+            """Fetch current model list before opening modal."""
+            return get_trained_model_names(), "DramaBox"
 
         # Build the base modal JS using show_input_modal_js
         base_modal_js = show_input_modal_js(
@@ -429,7 +404,7 @@ class TrainModelTool(Tool):
             outputs=restore_outputs
         ).then(
             fn=fetch_existing_models_and_type,
-            inputs=[components['model_type_radio']],
+            inputs=[],
             outputs=[components['existing_models_json'], components['train_model_type_state']]
         ).then(
             fn=None,
@@ -449,11 +424,11 @@ class TrainModelTool(Tool):
         def handle_train_model_input(input_value, model_type, folder, ref_lister,
                                      qwen_batch_size, qwen_lr, qwen_epochs, qwen_save_interval,
                                      vv_batch_size, vv_lr, vv_epochs, vv_save_interval,
-                                     vv_base_model_size,
-                                     vv_ddpm_batch_mul, vv_diffusion_loss_weight,
-                                     vv_ce_loss_weight, vv_voice_prompt_drop,
-                                     vv_train_diffusion_head, vv_gradient_accumulation,
-                                     vv_warmup_steps, vv_ema_enabled, progress=gr.Progress()):
+                                     vv_gradient_accumulation, vv_warmup_steps,
+                                     vv_lora_rank, vv_lora_alpha, vv_lora_dropout,
+                                     vv_lr_scheduler, vv_base_model, vv_ref_ratio,
+                                     vv_text_dropout, vv_seed, vv_resume_lora,
+                                     progress=gr.Progress()):
             """Process input modal submission for training."""
             if not input_value or not input_value.startswith("train_model_"):
                 return gr.update()
@@ -471,22 +446,18 @@ class TrainModelTool(Tool):
             if asr_manager:
                 asr_manager.unload_all()
 
-            if model_type == "VibeVoice":
-                return train_vibevoice_model(
+            if model_type == "DramaBox":
+                return train_dramabox_model(
                     folder, speaker_name, vv_batch_size, vv_lr, vv_epochs,
-                    vv_save_interval,
-                    vv_ddpm_batch_mul, vv_diffusion_loss_weight,
-                    vv_ce_loss_weight, vv_voice_prompt_drop,
-                    vv_train_diffusion_head, vv_gradient_accumulation,
-                    vv_warmup_steps, 0.99 if vv_ema_enabled else 0.0,
-                    vv_base_model_size, progress
+                    vv_save_interval, vv_gradient_accumulation, vv_warmup_steps,
+                    vv_lora_rank, vv_lora_alpha, vv_lora_dropout,
+                    vv_lr_scheduler, vv_base_model, vv_ref_ratio,
+                    vv_text_dropout, int(vv_seed) if vv_seed is not None else 42,
+                    str(vv_resume_lora).strip() if vv_resume_lora else "",
+                    progress
                 )
             else:
-                ref_audio = get_selected_ref_filename(ref_lister)
-                return train_model(
-                    folder, speaker_name, ref_audio, qwen_batch_size, qwen_lr,
-                    qwen_epochs, qwen_save_interval, progress
-                )
+                return "Error: Qwen3 finetuning is disabled in this DramaBox build."
 
         def deactivate_stop_btn():
             """Re-enable Start, disable Stop after training finishes."""
@@ -513,16 +484,18 @@ class TrainModelTool(Tool):
                 components['vv_learning_rate'],
                 components['vv_num_epochs'],
                 components['vv_save_interval'],
-                # VV-specific
-                components['vv_base_model_size'],
-                components['vv_ddpm_batch_mul'],
-                components['vv_diffusion_loss_weight'],
-                components['vv_ce_loss_weight'],
-                components['vv_voice_prompt_drop'],
-                components['vv_train_diffusion_head'],
+                # DramaBox-specific
                 components['vv_gradient_accumulation'],
                 components['vv_warmup_steps'],
-                components['vv_ema_enabled'],
+                components['vv_lora_rank'],
+                components['vv_lora_alpha'],
+                components['vv_lora_dropout'],
+                components['vv_lr_scheduler'],
+                components['vv_base_model'],
+                components['vv_ref_ratio'],
+                components['vv_text_dropout'],
+                components['vv_seed'],
+                components['vv_resume_lora'],
             ],
             outputs=[components['training_status']]
         ).then(
@@ -541,32 +514,35 @@ class TrainModelTool(Tool):
             outputs=[components['training_status']]
         )
 
-        # Tab select: refresh datasets and set correct section visibility
-        train_toggle_outputs = [
-            components['qwen_ref_section'],
-            components['qwen_params_section'],
-            components['vv_params_section'],
-            components['vv_base_model_section'],
-        ]
+        # --- Convert LoRA button ---
+        def handle_convert_lora(input_path):
+            """Convert a PEFT DramaBox LoRA to LTX-compatible format."""
+            if not input_path or not input_path.strip():
+                return "❌ Error: Please enter a LoRA file path."
+            from pathlib import Path
+            from modules.core_components.tools import PROJECT_ROOT
+            p = Path(input_path.strip())
+            if not p.is_absolute():
+                p = PROJECT_ROOT / p
+            if not p.exists():
+                return f"❌ Error: File not found: {p}"
+            result = convert_dramabox_lora_to_ltx(p)
+            if result is None:
+                return "❌ Error: Conversion failed. Check that the file is a valid safetensors LoRA."
+            return f"Converted: {result}"
 
+        components['convert_lora_btn'].click(
+            handle_convert_lora,
+            inputs=[components['convert_lora_input']],
+            outputs=[components['training_status']]
+        )
+
+        # Tab select: refresh datasets and set correct section visibility
         components['train_tab'].select(
             refresh_datasets_keep_selection,
             inputs=[components['train_folder_dropdown']],
             outputs=[components['train_folder_dropdown']]
-        ).then(
-            toggle_model_type,
-            inputs=[components['model_type_radio']],
-            outputs=train_toggle_outputs
         )
-
-        # Set correct initial visibility on page load (tab.select doesn't fire for the first tab)
-        app = shared_state.get('app')
-        if app:
-            app.load(
-                toggle_model_type,
-                inputs=[components['model_type_radio']],
-                outputs=train_toggle_outputs
-            )
 
 
 # Export for tab registry

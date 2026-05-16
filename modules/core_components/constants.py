@@ -47,7 +47,7 @@ MODEL_SIZES = ["Small", "Large"]  # Small=0.6B, Large=1.7B
 MODEL_SIZES_BASE = ["Small", "Large"]  # Base model: Small=0.6B, Large=1.7B
 MODEL_SIZES_CUSTOM = ["Small", "Large"]  # CustomVoice: Small=0.6B, Large=1.7B
 MODEL_SIZES_DESIGN = ["1.7B"]  # VoiceDesign only has 1.7B
-MODEL_SIZES_VIBEVOICE = ["Small", "Large (4-bit)", "Large"]  # VibeVoice: 1.5B, 7B-4bit, 7B
+MODEL_SIZES_VIBEVOICE = ["Small", "Large (4-bit)", "Large"]  # VibeVoice disabled in this build
 MODEL_SIZES_QWEN3_ASR = ["Small", "Large"]  # Qwen3-ASR: 0.6B, 1.7B
 
 # MMAudio Sound Effects model sizes - populated dynamically by FoleyManager
@@ -73,6 +73,7 @@ VOICE_CLONE_OPTIONS = [
     "Chatterbox - Default",
     "Chatterbox - Multilingual",
     "Fish Speech - S2 Pro",
+    "DramaBox - Default",
 ]
 
 # Default to Large models for better quality (static fallback)
@@ -110,6 +111,12 @@ TTS_ENGINES = {
         "choices": ["Fish Speech - S2 Pro"],
         "default_enabled": True,
         "import_check": ("fish_speech.models.text2semantic.inference", "init_model"),
+    },
+    "DramaBox": {
+        "label": "DramaBox",
+        "choices": ["DramaBox - Default"],
+        "default_enabled": True,
+        "import_check": None,
     },
 }
 
@@ -232,22 +239,36 @@ def check_engine_availability(user_config, save_config_fn=None):
             sys.stdout = old_stdout
             sys.stderr = old_stderr
 
-    # --- Check TTS engines ---
-    print("Checking TTS engines...")
-    engine_settings = user_config.get("enabled_engines", {})
-    tts_changed = False
+    # Cache: engines that passed last time are skipped (fast path).
+    # Engines that failed are always re-checked so newly installed packages are detected.
+    # Cache is stored in config.json under "_engine_check_cache".
+    cache = user_config.get("_engine_check_cache", {})
+    cache_changed = False
 
-    for engine_key, engine_info in TTS_ENGINES.items():
-        is_enabled = engine_settings.get(engine_key, engine_info.get("default_enabled", True))
-        if not is_enabled:
-            print(f"  {engine_info['label']:20s} [SKIP] (disabled in settings)")
-            continue
+    # Prune stale cache entries for engines no longer in the registry
+    known_keys = (
+        {f"tts.{k}" for k in TTS_ENGINES} |
+        {f"asr.{k}" for k in ASR_ENGINES}
+    )
+    stale = [k for k in list(cache) if k not in known_keys]
+    for k in stale:
+        del cache[k]
+        cache_changed = True
 
+    def _check_with_cache(engine_key, engine_info, cache_namespace):
+        """Return (available, was_cached). Updates cache in-place."""
+        cache_key = f"{cache_namespace}.{engine_key}"
         check = engine_info.get("import_check")
         if not check:
             results[engine_key] = True
             print(f"  {engine_info['label']:20s} [OK]")
-            continue
+            return True, False
+
+        # Fast path: previously confirmed available — skip re-import
+        if cache.get(cache_key) is True:
+            results[engine_key] = True
+            print(f"  {engine_info['label']:20s} [OK] (cached)")
+            return True, False
 
         module_name, attr_name = check
         available = _check_import(module_name, attr_name)
@@ -255,49 +276,40 @@ def check_engine_availability(user_config, save_config_fn=None):
 
         if available:
             print(f"  {engine_info['label']:20s} [OK]")
+            cache[cache_key] = True
         else:
             print(f"  {engine_info['label']:20s} [NOT FOUND] - auto-disabled")
-            if "enabled_engines" not in user_config:
-                user_config["enabled_engines"] = {}
-            user_config["enabled_engines"][engine_key] = False
-            tts_changed = True
+            cache[cache_key] = False
+
+        return available, True
 
     # --- Check ASR engines ---
-    print("Checking ASR engines...")
     asr_settings = user_config.get("enabled_asr_engines", {})
     asr_changed = False
 
     for engine_key, engine_info in ASR_ENGINES.items():
         is_enabled = asr_settings.get(engine_key, engine_info.get("default_enabled", True))
         if not is_enabled:
-            print(f"  {engine_info['label']:20s} [SKIP] (disabled in settings)")
+            cache.pop(f"asr.{engine_key}", None)
             continue
 
-        check = engine_info.get("import_check")
-        if not check:
-            results[engine_key] = True
-            print(f"  {engine_info['label']:20s} [OK]")
-            continue
-
-        module_name, attr_name = check
-        available = _check_import(module_name, attr_name)
-        results[engine_key] = available
-
-        if available:
-            print(f"  {engine_info['label']:20s} [OK]")
-        else:
-            print(f"  {engine_info['label']:20s} [NOT FOUND] - auto-disabled")
+        available, checked = _check_with_cache(engine_key, engine_info, "asr")
+        if checked:
+            cache_changed = True
+        if not available:
             if "enabled_asr_engines" not in user_config:
                 user_config["enabled_asr_engines"] = {}
             user_config["enabled_asr_engines"][engine_key] = False
             asr_changed = True
 
-    # Save config if anything changed
-    if (tts_changed or asr_changed) and save_config_fn:
-        if tts_changed:
-            save_config_fn("enabled_engines", user_config["enabled_engines"])
+    # Persist updates
+    if cache_changed:
+        user_config["_engine_check_cache"] = cache
+    if (asr_changed or cache_changed) and save_config_fn:
         if asr_changed:
             save_config_fn("enabled_asr_engines", user_config["enabled_asr_engines"])
+        if cache_changed:
+            save_config_fn("_engine_check_cache", cache)
 
     return results
 
@@ -422,8 +434,7 @@ DEFAULT_CONFIG = {
     "datasets_folder": "datasets",
     "temp_folder": "temp",
     "models_folder": "models",
-    "trained_models_folder": "trained_models",
-    "emotions": None  # Initialized separately
+    "trained_models_folder": "trained_models"
 }
 
 # ============================================================================
@@ -466,20 +477,26 @@ QWEN_TRAINING_DEFAULTS = {
 }
 
 # Training Defaults — VibeVoice
-VIBEVOICE_TRAINING_DEFAULTS = {
+DRAMABOX_TRAINING_DEFAULTS = {
     "batch_size": 1,
-    "learning_rate": 5e-5,
-    "num_epochs": 10,
-    "save_interval": 5,
-    "ddpm_batch_mul": 4,
-    "diffusion_loss_weight": 1.4,
-    "ce_loss_weight": 0.04,
-    "voice_prompt_drop": 1.0,
-    "train_diffusion_head": True,
-    "gradient_accumulation": 8,
-    "warmup_steps": 5,
-    "ema_enabled": True,
+    "learning_rate": 3e-5,
+    "num_epochs": 1000,
+    "save_interval": 200,
+    "gradient_accumulation": 4,
+    "warmup_steps": 100,
+    "lora_rank": 128,
+    "lora_alpha": 128,
+    "lora_dropout": 0.1,
+    "lr_scheduler": "cosine",
+    "base_model": "dev",
+    "ref_ratio": 0.3,
+    "text_dropout": 0.4,
+    "seed": 42,
+    "resume_lora": "",
 }
+
+# Keep alias for any code that still references the old name
+VIBEVOICE_TRAINING_DEFAULTS = DRAMABOX_TRAINING_DEFAULTS
 
 # LuxTTS Generation Defaults
 LUXTTS_GENERATION_DEFAULTS = {
@@ -540,13 +557,15 @@ CHATTERBOX_LANG_TO_CODE = {
 # ============================================================================
 
 APP_TITLE = "Voice Clone Studio"
-APP_SUBTITLE = "Powered by Qwen3-TTS, VibeVoice, LuxTTS, Chatterbox, Fish Speech and Whisper"
+APP_SUBTITLE = "Powered by DramaBox, MMAudio, Qwen3-ASR and Whisper"
 
 # Port assignments for standalone tool testing
 TOOL_PORTS = {
-    "voice_design": 7861,
     "voice_clone": 7862,
-    "voice_presets": 7863,
-    "conversation": 7864,
     "prep_audio": 7865,
+    "sound_effects": 7866,
+    "train_model": 7867,
+    "prompt_generator": 7868,
+    "output_history": 7869,
+    "settings": 7870,
 }

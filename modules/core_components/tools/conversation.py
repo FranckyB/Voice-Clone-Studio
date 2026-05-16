@@ -1,7 +1,7 @@
 """
 Conversation Tab
 
-Create conversations using VibeVoice, Qwen Base, or Qwen Speakers.
+Multi-speaker conversation generation using DramaBox.
 """
 # Setup path for standalone testing BEFORE imports
 if __name__ == "__main__":
@@ -9,29 +9,120 @@ if __name__ == "__main__":
     from pathlib import Path
     project_root = Path(__file__).parent.parent.parent.parent
     sys.path.insert(0, str(project_root))
-    sys.path.insert(0, str(project_root / "modules"))
-import gradio as gr
-import soundfile as sf
-import torch
-import numpy as np
-import random
+
 import re
+import os
+import random
+import soundfile as sf
+import numpy as np
+import gradio as gr
 from datetime import datetime
 from pathlib import Path
-from modules.core_components.ai_models.model_utils import set_seed, get_device
-from textwrap import dedent
 
 from modules.core_components.tool_base import Tool, ToolConfig
 from modules.core_components.ai_models.tts_manager import get_tts_manager
 
 
+NUM_SPEAKERS = 4
+
+DRAMABOX_TIPS_HTML = """
+<div style="background: #1e1e2e; border: 1px solid #444; border-radius: 8px; padding: 14px; font-size: 13px; color: #cdd6f4; line-height: 1.7;">
+  <b>DramaBox Conversation Tips</b>
+  <ul style="margin: 8px 0 0 18px; padding: 0;">
+    <li>Label each line with a speaker number: <code>[1]: Hello</code>, <code>[2]: Hi there</code></li>
+    <li>Speakers without a label default to speaker 1</li>
+    <li>Assign a voice sample to each active speaker number</li>
+    <li>Pause Linebreak adds silence between every speaker exchange</li>
+    <li>Style instructions in parentheses e.g. <code>(whispering)</code> are stripped before generation</li>
+  </ul>
+</div>
+"""
+
+
+def preprocess_conversation_script(script_text):
+    """Ensure every line has a [N]: speaker label. Defaults unlabelled lines to [1]:."""
+    if not script_text:
+        return ""
+    lines = script_text.strip().split("\n")
+    processed = []
+    pattern = re.compile(r"^\s*\[(\d+)\]\s*:")
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            processed.append("")
+            continue
+        if pattern.match(stripped):
+            processed.append(stripped)
+        else:
+            processed.append(f"[1]: {stripped}")
+    return "\n".join(processed)
+
+
+def extract_style_instructions(text):
+    """Remove parenthetical style markers like (whispering) from text."""
+    if not text:
+        return text
+    cleaned = re.sub(r"\([^)]*\)", "", text)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned
+
+
+def prepare_voice_samples_dict(get_available_samples, *voice_names):
+    """
+    Build {speaker_index: wav_path} from voice dropdown values.
+    voice_names is a sequence of (sample_name or None), indexed 1..N.
+    """
+    samples = get_available_samples()
+    samples_by_name = {s["name"]: s["wav_path"] for s in samples}
+    result = {}
+    for i, name in enumerate(voice_names, start=1):
+        if name and name != "(None)" and name in samples_by_name:
+            result[i] = samples_by_name[name]
+        else:
+            result[i] = None
+    return result
+
+
+def finalize_conversation_output(segment_paths, pause_secs, TEMP_DIR, OUTPUT_DIR, _user_config, save_result_to_output, metadata_text):
+    """Concatenate audio segments with optional silence pauses and return final path."""
+    if not segment_paths:
+        raise RuntimeError("No audio segments to concatenate.")
+
+    SAMPLE_RATE = 24000
+    frames_list = []
+    for path in segment_paths:
+        data, sr = sf.read(str(path))
+        if sr != SAMPLE_RATE:
+            import librosa
+            data = librosa.resample(data, orig_sr=sr, target_sr=SAMPLE_RATE)
+        if data.ndim > 1:
+            data = data[:, 0]
+        frames_list.append(data)
+        if pause_secs > 0:
+            pause_frames = np.zeros(int(SAMPLE_RATE * pause_secs), dtype=np.float32)
+            frames_list.append(pause_frames)
+
+    combined = np.concatenate(frames_list).astype(np.float32)
+    stem = f"conv_dramabox_{datetime.now().strftime('%Y%m%d_%H%M%S')}.wav"
+    temp_out = TEMP_DIR / stem
+    sf.write(str(temp_out), combined, SAMPLE_RATE)
+
+    manual_save = _user_config.get("manual_save", False)
+    if manual_save:
+        return str(temp_out)
+
+    output_format = _user_config.get("output_format", "wav")
+    final = save_result_to_output(temp_out, OUTPUT_DIR, output_format, metadata_text)
+    return str(final)
+
+
 class ConversationTool(Tool):
-    """Conversation tool implementation."""
+    """Multi-speaker Conversation tool — DramaBox only."""
 
     config = ToolConfig(
         name="Conversation",
         module_name="tool_conversation",
-        description="Create multi-speaker conversations",
+        description="Generate multi-speaker conversations using DramaBox",
         enabled=True,
         category="generation"
     )
@@ -41,1830 +132,452 @@ class ConversationTool(Tool):
         """Create Conversation tool UI."""
         components = {}
 
-        # Get helper functions and config
-        format_help_html = shared_state['format_help_html']
         get_sample_choices = shared_state['get_sample_choices']
-        get_available_samples = shared_state['get_available_samples']
-        create_vibevoice_advanced_params = shared_state['create_vibevoice_advanced_params']
-        create_qwen_advanced_params = shared_state['create_qwen_advanced_params']
-        create_luxtts_advanced_params = shared_state['create_luxtts_advanced_params']
-        create_emotion_intensity_slider = shared_state['create_emotion_intensity_slider']
         _user_config = shared_state['_user_config']
-        LANGUAGES = shared_state['LANGUAGES']
-        MODEL_SIZES_CUSTOM = shared_state['MODEL_SIZES_CUSTOM']
-        MODEL_SIZES_BASE = shared_state['MODEL_SIZES_BASE']
-        MODEL_SIZES_VIBEVOICE = shared_state['MODEL_SIZES_VIBEVOICE']
-        CUSTOM_VOICE_SPEAKERS = shared_state['CUSTOM_VOICE_SPEAKERS']
-        _active_emotions = shared_state.get('_active_emotions', {})
-        TTS_ENGINES = shared_state.get('TTS_ENGINES', {})
+        create_dramabox_advanced_params = shared_state['create_dramabox_advanced_params']
 
-        # Mapping: conversation radio label -> engine key in TTS_ENGINES
-        CONV_ENGINE_MAP = {
-            "VibeVoice": "VibeVoice",
-            "Qwen Base": "Qwen3",
-            "Qwen Speakers": "Qwen3",
-            "Chatterbox": "Chatterbox",
-            "LuxTTS": "LuxTTS",
-        }
-        ALL_CONV_CHOICES = ["VibeVoice", "Qwen Base", "Qwen Speakers", "Chatterbox", "LuxTTS"]
+        voice_choices = ["(None)"] + get_sample_choices()
 
-        # Filter conversation choices based on enabled engines
-        engine_settings = _user_config.get("enabled_engines", {})
-        visible_choices = []
-        for choice in ALL_CONV_CHOICES:
-            engine_key = CONV_ENGINE_MAP.get(choice)
-            if engine_key:
-                engine_info = TTS_ENGINES.get(engine_key, {})
-                if engine_settings.get(engine_key, engine_info.get("default_enabled", True)):
-                    visible_choices.append(choice)
-        if not visible_choices:
-            visible_choices = ALL_CONV_CHOICES  # Safety fallback
-
-        # Model selector at top
-        initial_conv_model = _user_config.get("conv_model_type", "VibeVoice")
-        if initial_conv_model not in visible_choices:
-            initial_conv_model = visible_choices[0]
-
-        # All sections start visible=True so Gradio renders their DOM.
-        # toggle_conv_ui on tab.select sets the correct visibility.
-
-        with gr.TabItem("Conversation", id="tab_conversation") as conv_tab:
-            components['conv_tab'] = conv_tab
-            gr.Markdown("Choose a model and create multi-speaker conversations with your custom voices")
-            components['conv_model_type'] = gr.Radio(
-                choices=visible_choices,
-                value=initial_conv_model,
-                show_label=False,
-                container=False
-            )
-
-            # Get sample choices once for all dropdowns
-            conversation_available_samples = get_sample_choices()
-            conversation_first_sample = conversation_available_samples[0] if conversation_available_samples else None
+        with gr.TabItem("Conversation", id="tab_conversation") as conversation_tab:
+            components['conversation_tab'] = conversation_tab
+            gr.Markdown("Generate multi-speaker conversations using DramaBox. Label each line with <code>[1]:</code>, <code>[2]:</code> etc.")
 
             with gr.Row():
-                # Left - Script input and model-specific controls
+                # Left column — script + voice assignment
                 with gr.Column(scale=2):
                     gr.Markdown("### Conversation Script")
+
+                    components['conv_script'] = gr.Textbox(
+                        label="Script",
+                        placeholder="[1]: Hello, how are you?\n[2]: I'm doing great, thanks!\n[1]: That's wonderful to hear.",
+                        lines=18,
+                    )
 
                     import modules.core_components.prompt_hub as _prompt_hub
                     components.update(_prompt_hub.create_prompt_loader("conv", "Saved Prompts"))
 
-                    components['conversation_script'] = gr.Textbox(
-                        label="Script:",
-                        placeholder=dedent("""\
-                            Use [N]: format for speaker labels (up to 4 speakers).
-                            Qwen also supports (style) for emotions:
-
-                            [1]: (cheerful) Hey, how's it going?
-                            [2]: (excited) I'm doing great, thanks for asking!
-                            [1]: That's wonderful to hear.
-                            [3]: (curious) Mind if I join this conversation?
-
-                            Qwen Speakers: Preset voices with style control and Pause Controls.
-                            Qwen Base: Your custom voice clips with advanced pause control.
-                            VibeVoice: Natural long-form generation with custom voices.
-                            LuxTTS / Chatterbox: Voice cloning with custom samples."""),
-                        lines=18
-                    )
-
-                    # Qwen Speakers voice assignment (preset voices from CUSTOM_VOICE_SPEAKERS)
-                    components['qwen_speakers_voices_section'] = gr.Column(visible=True)
-                    with components['qwen_speakers_voices_section']:
-                        gr.Markdown("### Assign Preset Voices (Up to 4 Speakers)")
-
-                        qwen_defaults = CUSTOM_VOICE_SPEAKERS[:4] if CUSTOM_VOICE_SPEAKERS else []
-                        with gr.Row():
-                            with gr.Column():
-                                components['qwen_speaker_voice_1'] = gr.Dropdown(
-                                    choices=CUSTOM_VOICE_SPEAKERS,
-                                    value=qwen_defaults[0] if len(qwen_defaults) > 0 else None,
-                                    label="[1] Voice",
-                                )
-                            with gr.Column():
-                                components['qwen_speaker_voice_2'] = gr.Dropdown(
-                                    choices=CUSTOM_VOICE_SPEAKERS,
-                                    value=qwen_defaults[1] if len(qwen_defaults) > 1 else None,
-                                    label="[2] Voice",
-                                )
-
-                        with gr.Row():
-                            with gr.Column():
-                                components['qwen_speaker_voice_3'] = gr.Dropdown(
-                                    choices=CUSTOM_VOICE_SPEAKERS,
-                                    value=qwen_defaults[2] if len(qwen_defaults) > 2 else None,
-                                    label="[3] Voice",
-                                )
-                            with gr.Column():
-                                components['qwen_speaker_voice_4'] = gr.Dropdown(
-                                    choices=CUSTOM_VOICE_SPEAKERS,
-                                    value=qwen_defaults[3] if len(qwen_defaults) > 3 else None,
-                                    label="[4] Voice",
-                                )
-
-                    # Shared voice sample selectors (used by Qwen Base, LuxTTS, Chatterbox, VibeVoice)
-                    components['shared_voices_section'] = gr.Column(visible=True)
-                    with components['shared_voices_section']:
-                        gr.Markdown("### Voice Samples (Up to 4 Speakers)")
-
-                        with gr.Row():
-                            with gr.Column():
-                                components['conv_voice_1'] = gr.Dropdown(
-                                    choices=conversation_available_samples,
-                                    value=conversation_first_sample,
-                                    label="[1] Voice Sample",
-                                    info="Select from your prepared samples"
-                                )
-                            with gr.Column():
-                                components['conv_voice_2'] = gr.Dropdown(
-                                    choices=conversation_available_samples,
-                                    value=conversation_first_sample,
-                                    label="[2] Voice Sample",
-                                    info="Select from your prepared samples"
-                                )
-
-                        with gr.Row():
-                            with gr.Column():
-                                components['conv_voice_3'] = gr.Dropdown(
-                                    choices=conversation_available_samples,
-                                    value=conversation_first_sample,
-                                    label="[3] Voice Sample",
-                                    info="Select from your prepared samples"
-                                )
-                            with gr.Column():
-                                components['conv_voice_4'] = gr.Dropdown(
-                                    choices=conversation_available_samples,
-                                    value=conversation_first_sample,
-                                    label="[4] Voice Sample",
-                                    info="Select from your prepared samples"
-                                )
-
-
-
-                # Right - Settings and output
-                with gr.Column(scale=1):
-                    gr.Markdown("### Settings")
-
-                    # Qwen Speakers settings
-                    components['qwen_custom_settings'] = gr.Column(visible=True)
-                    with components['qwen_custom_settings']:
-                        components['conv_model_size'] = gr.Dropdown(
-                            choices=MODEL_SIZES_CUSTOM,
-                            value=_user_config.get("conv_model_size", "Large"),
-                            label="Model Size",
-                            info="Small = Faster, Large = Better Quality"
-                        )
-
-                    # Qwen Base settings
-                    components['qwen_base_settings'] = gr.Column(visible=True)
-                    with components['qwen_base_settings']:
-                        components['conv_base_model_size'] = gr.Dropdown(
-                            choices=MODEL_SIZES_BASE,
-                            value=_user_config.get("conv_base_model_size", "Small"),
-                            label="Model Size",
-                            info="Small = Faster, Large = Better Quality"
-                        )
-
-                    # Shared Language and Seed — always start with full list, toggle_conv_ui adjusts
-                    from modules.core_components.constants import CHATTERBOX_LANGUAGES
-                    initial_lang_choices = LANGUAGES
-                    initial_lang_value = _user_config.get("language", "Auto")
-                    with gr.Column():
-                        with gr.Row():
-                            components['conv_language'] = gr.Dropdown(
-                                scale=5,
-                                choices=initial_lang_choices,
-                                value=initial_lang_value,
-                                label="Language",
-                                info="Language for all lines (Auto recommended)"
-                            )
-                            components['conv_seed'] = gr.Number(
-                                label="Seed",
-                                value=-1,
-                                precision=0,
-                                info="(-1 for random)"
-                            )
-
-                    # Shared Pause Controls
-                    components['qwen_pause_controls'] = gr.Accordion("Pause Controls", open=False, visible=True)
-                    with components['qwen_pause_controls']:
+                    gr.Markdown("### Voice Assignment")
+                    with gr.Row():
                         with gr.Column():
-                            components['conv_pause_linebreak'] = gr.Slider(
-                                minimum=0.0,
-                                maximum=3.0,
-                                value=_user_config.get("conv_pause_linebreak", 0.25),
-                                step=0.05,
-                                label="Pause Between Lines",
-                                info="Silence between each speaker turn"
+                            components['conv_voice_1'] = gr.Dropdown(
+                                choices=voice_choices, value="(None)",
+                                label="Speaker 1 Voice", interactive=True
                             )
-
-                            with gr.Row():
-                                components['conv_pause_period'] = gr.Slider(
-                                    minimum=0.0,
-                                    maximum=2.0,
-                                    value=_user_config.get("conv_pause_period", 0.4),
-                                    step=0.1,
-                                    label="After Period (.)",
-                                    info="Pause after periods"
-                                )
-                                components['conv_pause_comma'] = gr.Slider(
-                                    minimum=0.0,
-                                    maximum=2.0,
-                                    value=_user_config.get("conv_pause_comma", 0.2),
-                                    step=0.1,
-                                    label="After Comma (,)",
-                                    info="Pause after commas"
-                                )
-
-                            with gr.Row():
-                                components['conv_pause_question'] = gr.Slider(
-                                    minimum=0.0,
-                                    maximum=2.0,
-                                    value=_user_config.get("conv_pause_question", 0.6),
-                                    step=0.1,
-                                    label="After Question (?)",
-                                    info="Pause after questions"
-                                )
-                                components['conv_pause_hyphen'] = gr.Slider(
-                                    minimum=0.0,
-                                    maximum=2.0,
-                                    value=_user_config.get("conv_pause_hyphen", 0.3),
-                                    step=0.1,
-                                    label="After Hyphen (-)",
-                                    info="Pause after hyphens"
-                                )
-
-                    # Chatterbox-specific settings
-                    components['cb_settings'] = gr.Column(visible=True)
-                    with components['cb_settings']:
-                        # Pause between lines
-                        components['cb_pause_linebreak'] = gr.Slider(
-                            minimum=0.0,
-                            maximum=3.0,
-                            value=0.25,
-                            step=0.05,
-                            label="Pause Between Lines",
-                            info="Silence between each speaker turn"
-                        )
-
-                        # Chatterbox Advanced Parameters
-                        create_chatterbox_advanced_params = shared_state['create_chatterbox_advanced_params']
-                        cb_conv_params = create_chatterbox_advanced_params(
-                            visible=True
-                        )
-                        components['cb_conv_exaggeration'] = cb_conv_params['exaggeration']
-                        components['cb_conv_cfg_weight'] = cb_conv_params['cfg_weight']
-                        components['cb_conv_temperature'] = cb_conv_params['temperature']
-                        components['cb_conv_repetition_penalty'] = cb_conv_params['repetition_penalty']
-                        components['cb_conv_top_p'] = cb_conv_params['top_p']
-                        components['cb_conv_accordion'] = cb_conv_params.get('accordion')
-
-                    # LuxTTS-specific settings
-                    components['luxtts_settings'] = gr.Column(visible=True)
-                    with components['luxtts_settings']:
-                        # Pause between lines
-                        components['luxtts_pause_linebreak'] = gr.Slider(
-                            minimum=0.0,
-                            maximum=3.0,
-                            value=0.25,
-                            step=0.05,
-                            label="Pause Between Lines",
-                            info="Silence between each speaker turn"
-                        )
-
-                        # LuxTTS Advanced Parameters
-                        lux_conv_params = create_luxtts_advanced_params(
-                            visible=True
-                        )
-                        components['lux_conv_num_steps'] = lux_conv_params['num_steps']
-                        components['lux_conv_t_shift'] = lux_conv_params['t_shift']
-                        components['lux_conv_speed'] = lux_conv_params['speed']
-                        components['lux_conv_guidance_scale'] = lux_conv_params['guidance_scale']
-                        components['lux_conv_rms'] = lux_conv_params['rms']
-                        components['lux_conv_ref_duration'] = lux_conv_params['ref_duration']
-                        components['lux_conv_return_smooth'] = lux_conv_params['return_smooth']
-                        components['lux_conv_accordion'] = lux_conv_params.get('accordion')
-
-                    # VibeVoice settings
-                    components['vibevoice_settings'] = gr.Column(visible=True)
-                    with components['vibevoice_settings']:
-                        components['vv_model_size_row'] = gr.Row(visible=True)
-                        with components['vv_model_size_row']:
-                            components['longform_model_size'] = gr.Dropdown(
-                                choices=MODEL_SIZES_VIBEVOICE,
-                                value=_user_config.get("vibevoice_model_size", "Large"),
-                                label="Model Size",
-                                info="Small = Faster, Large = Better Quality"
+                            components['conv_lora_dropdown_1'] = gr.Dropdown(
+                                choices=["(None)"], value="(None)",
+                                label="Speaker 1 LoRA", interactive=True
                             )
-
-                        # VibeVoice Advanced Parameters
-                        vv_conv_params = create_vibevoice_advanced_params(
-                            include_paragraph_per_chunk=True,
-                            visible=True
-                        )
-                        components['vv_conv_num_steps'] = vv_conv_params['num_steps']
-                        components['longform_cfg_scale'] = vv_conv_params['cfg_scale']
-                        components['vv_conv_do_sample'] = vv_conv_params['do_sample']
-                        components['vv_conv_paragraph_per_chunk'] = vv_conv_params['paragraph_per_chunk']
-                        components['vv_conv_repetition_penalty'] = vv_conv_params['repetition_penalty']
-                        components['vv_conv_temperature'] = vv_conv_params['temperature']
-                        components['vv_conv_top_k'] = vv_conv_params['top_k']
-                        components['vv_conv_top_p'] = vv_conv_params['top_p']
-                        components['vv_conv_accordion'] = vv_conv_params.get('accordion')
-
-                    # Qwen Custom Voice Advanced Parameters
-                    components['qwen_custom_conv_advanced'] = gr.Column(visible=True)
-                    with components['qwen_custom_conv_advanced']:
-                        qwen_custom_conv_params = create_qwen_advanced_params(
-                            include_emotion=False,
-                            visible=True
-                        )
-                        components['qwen_custom_conv_do_sample'] = qwen_custom_conv_params['do_sample']
-                        components['qwen_custom_conv_temperature'] = qwen_custom_conv_params['temperature']
-                        components['qwen_custom_conv_top_k'] = qwen_custom_conv_params['top_k']
-                        components['qwen_custom_conv_top_p'] = qwen_custom_conv_params['top_p']
-                        components['qwen_custom_conv_repetition_penalty'] = qwen_custom_conv_params['repetition_penalty']
-                        components['qwen_custom_conv_max_new_tokens'] = qwen_custom_conv_params['max_new_tokens']
-                        components['qwen_custom_conv_accordion'] = qwen_custom_conv_params.get('accordion')
-
-                    # Qwen Base Advanced Parameters
-                    components['qwen_base_conv_advanced'] = gr.Column(visible=True)
-                    with components['qwen_base_conv_advanced']:
-                        # Emotion intensity slider (Base only)
-                        components['conv_emotion_intensity_row'] = gr.Row()
-                        with components['conv_emotion_intensity_row']:
-                            components['conv_emotion_intensity'] = create_emotion_intensity_slider(
-                                initial_intensity=1.0,
-                                label="Emotion Intensity",
-                                visible=True
+                        with gr.Column():
+                            components['conv_voice_2'] = gr.Dropdown(
+                                choices=voice_choices, value="(None)",
+                                label="Speaker 2 Voice", interactive=True
                             )
+                            components['conv_lora_dropdown_2'] = gr.Dropdown(
+                                choices=["(None)"], value="(None)",
+                                label="Speaker 2 LoRA", interactive=True
+                            )
+                    with gr.Row():
+                        with gr.Column():
+                            components['conv_voice_3'] = gr.Dropdown(
+                                choices=voice_choices, value="(None)",
+                                label="Speaker 3 Voice", interactive=True
+                            )
+                            components['conv_lora_dropdown_3'] = gr.Dropdown(
+                                choices=["(None)"], value="(None)",
+                                label="Speaker 3 LoRA", interactive=True
+                            )
+                        with gr.Column():
+                            components['conv_voice_4'] = gr.Dropdown(
+                                choices=voice_choices, value="(None)",
+                                label="Speaker 4 Voice", interactive=True
+                            )
+                            components['conv_lora_dropdown_4'] = gr.Dropdown(
+                                choices=["(None)"], value="(None)",
+                                label="Speaker 4 LoRA", interactive=True
+                            )
+                    components['conv_lora_path_map'] = gr.State(value={})
 
-                        qwen_base_conv_params = create_qwen_advanced_params(
-                            include_emotion=False,
-                            visible=True
-                        )
-                        components['qwen_base_conv_do_sample'] = qwen_base_conv_params['do_sample']
-                        components['qwen_base_conv_temperature'] = qwen_base_conv_params['temperature']
-                        components['qwen_base_conv_top_k'] = qwen_base_conv_params['top_k']
-                        components['qwen_base_conv_top_p'] = qwen_base_conv_params['top_p']
-                        components['qwen_base_conv_repetition_penalty'] = qwen_base_conv_params['repetition_penalty']
-                        components['qwen_base_conv_max_new_tokens'] = qwen_base_conv_params['max_new_tokens']
-                        components['qwen_base_conv_accordion'] = qwen_base_conv_params.get('accordion')
+                # Right column — DramaBox settings + generate
+                with gr.Column(scale=1):
 
-                    # Shared settings
-                    components['conv_generate_btn'] = gr.Button("Generate Conversation", variant="primary", size="lg")
-
-                    components['conv_output_audio'] = gr.Audio(
-                        label="Generated Conversation",
-                        type="filepath"
+                    gr.Markdown("### Generation Settings")
+                    components['conv_seed'] = gr.Number(
+                        label="Seed (-1 for random)", value=-1, precision=0
                     )
 
-                    # Save button — visible only when "Review Before Saving" is enabled
+                    components['db_conv_pause_linebreak'] = gr.Slider(
+                        label="Pause Between Exchanges (seconds)",
+                        minimum=0.0, maximum=3.0, step=0.05, value=0.3
+                    )
+
+                    # Create with hardcoded defaults; saved values are restored on tab.select
+                    _db_params = create_dramabox_advanced_params()
+                    components['db_conv_accordion'] = _db_params['accordion']
+                    components['db_conv_negative_prompt'] = _db_params['negative_prompt']
+                    components['db_conv_ref_duration'] = _db_params['ref_duration']
+                    components['db_conv_gen_duration'] = _db_params['gen_duration']
+                    components['db_conv_steps'] = _db_params['steps']
+                    components['db_conv_sampler'] = _db_params['sampler']
+                    components['db_conv_speed'] = _db_params['speed']
+                    components['db_conv_duration_multiplier'] = _db_params['duration_multiplier']
+                    components['db_conv_cfg_scale'] = _db_params['cfg_scale']
+                    components['db_conv_stg_scale'] = _db_params['stg_scale']
+                    components['db_conv_rescale_scale'] = _db_params['rescale_scale']
+                    components['db_conv_id_guidance_scale'] = _db_params['id_guidance_scale']
+                    components['db_conv_no_watermark'] = _db_params['no_watermark']
+
+                    components['generate_btn'] = gr.Button(
+                        "Generate Conversation", variant="primary", size="lg"
+                    )
+                    components['output_audio'] = gr.Audio(
+                        label="Generated Conversation", type="filepath"
+                    )
+
                     manual_save = _user_config.get("manual_save", False)
-                    components['conv_save_result_btn'] = gr.Button(
+                    components['save_result_btn'] = gr.Button(
                         "Save to Output", variant="primary", size="lg",
                         visible=manual_save, interactive=False
                     )
-                    components['_conv_result_metadata'] = gr.Textbox(visible=False)
+                    components['_result_metadata'] = gr.Textbox(visible=False)
 
-                    components['conv_status'] = gr.Textbox(label="Status", interactive=False, lines=2, max_lines=5)
-
-                    # Model-specific tips
-                    qwen_custom_tips_text = dedent("""\
-                    **Qwen Speakers Tips:**
-                    - Fast generation with preset voices
-                    - Up to 4 different speakers
-                    - Tip: Use `[break=1.5]` inline for custom pauses
-                    - Each voice optimized for their native language
-                    - Style instructions: (cheerful), (sad), (excited), etc.
-                    """)
-
-                    qwen_base_tips_text = dedent("""\
-                    **Qwen Base Tips:**
-                    - Use your own custom voice samples
-                    - Up to 4 different speakers
-                    - Tip: Use `[break=1.5]` inline for custom pauses
-                    - Advanced pause control (periods, commas, questions, hyphens)
-                    - Prepare 3-10 second voice samples in samples/ folder
-                    """)
-
-                    vibevoice_tips_text = dedent("""\
-                    **VibeVoice Tips:**
-                    - Up to 90 minutes continuous generation
-                    - Up to 4 speakers with custom voices
-                    - May spontaneously add background music/sounds
-                    - Longer scripts work best with Large model
-                    - Natural conversation flow (no manual pause control)
-                    """)
-
-                    luxtts_tips_text = dedent("""\
-                    **LuxTTS Tips:**
-                    - Up to 4 speakers with custom voice samples
-                    - Sequential generation: each line generated individually then stitched
-                    - Voice prompts are cached per speaker for fast subsequent lines
-                    - 48kHz output for high quality audio
-                    - No style/emotion control (use Qwen for that)
-                    - Adjust ref_duration if voice quality is poor
-                    """)
-
-                    components['qwen_custom_tips'] = gr.HTML(
-                        value=format_help_html(qwen_custom_tips_text),
-                        container=True,
-                        padding=True,
-                        visible=True
+                    components['conv_status'] = gr.Textbox(
+                        label="Status", interactive=False, lines=3, max_lines=8
                     )
 
-                    components['qwen_base_tips'] = gr.HTML(
-                        value=format_help_html(qwen_base_tips_text),
-                        container=True,
-                        padding=True,
-                        visible=True
-                    )
+            components['dramabox_tips'] = gr.HTML(value=DRAMABOX_TIPS_HTML)
 
-                    components['vibevoice_tips'] = gr.HTML(
-                        value=format_help_html(vibevoice_tips_text),
-                        container=True,
-                        padding=True,
-                        visible=True
-                    )
-
-                    components['luxtts_tips'] = gr.HTML(
-                        value=format_help_html(luxtts_tips_text),
-                        container=True,
-                        padding=True,
-                        visible=True
-                    )
-
-                    chatterbox_tips_text = dedent("""\
-                    **Chatterbox Tips:**
-                    - Up to 4 speakers with custom voice samples
-                    - English uses fast default TTS model
-                    - Other languages use Multilingual model (23 languages)
-                    - Sequential generation: each line generated then stitched
-                    - Exaggeration controls emotion intensity (0=neutral, 2=max)
-                    - No text transcript needed for voice samples
-                    """)
-
-                    components['cb_tips'] = gr.HTML(
-                        value=format_help_html(chatterbox_tips_text),
-                        container=True,
-                        padding=True,
-                        visible=True
-                    )
-
-            return components
+        return components
 
     @classmethod
     def setup_events(cls, components, shared_state):
         """Wire up Conversation tab events."""
 
-        # Get helper functions
-        get_available_samples = shared_state['get_available_samples']
         get_sample_choices = shared_state['get_sample_choices']
+        get_available_samples = shared_state['get_available_samples']
         save_preference = shared_state['save_preference']
         OUTPUT_DIR = shared_state['OUTPUT_DIR']
         TEMP_DIR = shared_state['TEMP_DIR']
-        CUSTOM_VOICE_SPEAKERS = shared_state['CUSTOM_VOICE_SPEAKERS']
-        LANGUAGES = shared_state['LANGUAGES']
-        _active_emotions = shared_state.get('_active_emotions', {})
         play_completion_beep = shared_state.get('play_completion_beep')
-        get_or_create_voice_prompt = shared_state.get('get_or_create_voice_prompt')
-        save_audio_to_temp = shared_state['save_audio_to_temp']
         save_result_to_output = shared_state['save_result_to_output']
+        _user_config = shared_state['_user_config']
 
-        # Get TTS manager (singleton)
         tts_manager = get_tts_manager()
 
-        # Wire param persistence (auto-save on change)
         wire_param_persistence = shared_state['wire_param_persistence']
-        _user_config = shared_state['_user_config']
         param_map = {
-            'qwen_custom': [
-                ('qwen_custom_conv_do_sample', 'do_sample'),
-                ('qwen_custom_conv_temperature', 'temperature'),
-                ('qwen_custom_conv_top_k', 'top_k'),
-                ('qwen_custom_conv_top_p', 'top_p'),
-                ('qwen_custom_conv_repetition_penalty', 'repetition_penalty'),
-                ('qwen_custom_conv_max_new_tokens', 'max_new_tokens'),
-            ],
-            'qwen_base': [
-                ('conv_emotion_intensity', 'emotion_intensity'),
-                ('qwen_base_conv_do_sample', 'do_sample'),
-                ('qwen_base_conv_temperature', 'temperature'),
-                ('qwen_base_conv_top_k', 'top_k'),
-                ('qwen_base_conv_top_p', 'top_p'),
-                ('qwen_base_conv_repetition_penalty', 'repetition_penalty'),
-                ('qwen_base_conv_max_new_tokens', 'max_new_tokens'),
-            ],
-            'vibevoice': [
-                ('longform_cfg_scale', 'cfg_scale'),
-                ('vv_conv_num_steps', 'num_steps'),
-                ('vv_conv_do_sample', 'do_sample'),
-                ('vv_conv_paragraph_per_chunk', 'paragraph_per_chunk'),
-                ('vv_conv_repetition_penalty', 'repetition_penalty'),
-                ('vv_conv_temperature', 'temperature'),
-                ('vv_conv_top_k', 'top_k'),
-                ('vv_conv_top_p', 'top_p'),
-            ],
-            'luxtts': [
-                ('lux_conv_num_steps', 'num_steps'),
-                ('lux_conv_t_shift', 't_shift'),
-                ('lux_conv_speed', 'speed'),
-                ('lux_conv_return_smooth', 'return_smooth'),
-                ('lux_conv_rms', 'rms'),
-                ('lux_conv_ref_duration', 'ref_duration'),
-                ('lux_conv_guidance_scale', 'guidance_scale'),
-            ],
-            'chatterbox': [
-                ('cb_conv_exaggeration', 'exaggeration'),
-                ('cb_conv_cfg_weight', 'cfg_weight'),
-                ('cb_conv_temperature', 'temperature'),
-                ('cb_conv_repetition_penalty', 'repetition_penalty'),
-                ('cb_conv_top_p', 'top_p'),
+            'dramabox': [
+                ('conv_seed', 'seed'),
+                ('db_conv_ref_duration', 'ref_duration'),
+                ('db_conv_gen_duration', 'gen_duration'),
+                ('db_conv_steps', 'steps'),
+                ('db_conv_sampler', 'sampler'),
+                ('db_conv_speed', 'speed'),
+                ('db_conv_duration_multiplier', 'duration_multiplier'),
+                ('db_conv_cfg_scale', 'cfg_scale'),
+                ('db_conv_stg_scale', 'stg_scale'),
+                ('db_conv_rescale_scale', 'rescale_scale'),
+                ('db_conv_id_guidance_scale', 'id_guidance_scale'),
+                ('db_conv_pause_linebreak', 'pause_linebreak'),
             ],
         }
         wire_param_persistence(components, _user_config, param_map)
 
-        # Create restore handler for applying saved params on tab select / model switch
         create_param_restore_handler = shared_state['create_param_restore_handler']
         restore_fn, restore_outputs = create_param_restore_handler(components, _user_config, param_map)
 
-        def finalize_conversation_output(final_audio, sr, filename_stem, metadata_out, status_msg, progress):
-            """Save conversation audio to temp, then auto-save or wait for manual save."""
-            temp_path = save_audio_to_temp(final_audio, sr, TEMP_DIR, filename_stem)
-            manual_save = _user_config.get("manual_save", False)
-            if manual_save:
-                progress(1.0, desc="Done!")
-                if play_completion_beep:
-                    play_completion_beep()
-                return str(temp_path), status_msg + "\nClick 'Save to Output' to keep this result.", metadata_out, gr.update(interactive=True)
-            else:
-                output_format = _user_config.get("output_format", "wav")
-                output_path = save_result_to_output(temp_path, OUTPUT_DIR, output_format, metadata_out)
-                progress(1.0, desc="Done!")
-                if play_completion_beep:
-                    play_completion_beep()
-                return str(output_path), status_msg, "", gr.update()
-
-        def prepare_voice_samples_dict(v1, v2=None, v3=None, v4=None):
-            """Prepare voice samples dictionary for generation."""
-            from modules.core_components.tools import strip_sample_extension
-            samples = {}
-            available_samples = get_available_samples()
-
-            voice_inputs = [("Speaker1", v1), ("Speaker2", v2), ("Speaker3", v3), ("Speaker4", v4)]
-
-            for speaker_num, sample_name in voice_inputs:
-                if sample_name:
-                    bare_name = strip_sample_extension(sample_name)
-                    for s in available_samples:
-                        if s["name"] == bare_name:
-                            samples[speaker_num] = {
-                                "wav_path": s["wav_path"],
-                                "ref_text": s["ref_text"],
-                                "name": s["name"]
-                            }
-                            break
-            return samples
-
-        def validate_samples_have_transcripts(voice_samples_dict):
-            """Check that all voice samples have transcripts. Returns error message or None."""
-            missing = []
-            for speaker_key, data in voice_samples_dict.items():
-                ref_text = data.get("ref_text", "").strip()
-                if not ref_text:
-                    name = data.get("name", speaker_key)
-                    missing.append(name)
-            if missing:
-                names = ", ".join(missing)
-                return (
-                    f"No transcript found for: {names}.\n\n"
-                    "Please transcribe these samples first in the **Prep Audio** tab "
-                    "(using Whisper or VibeVoice ASR), then try again."
-                )
-            return None
-
-        def preprocess_conversation_script(script):
-            """Add [1]: to lines without speaker labels."""
-            lines = script.strip().split('\n')
-            processed_lines = []
-            for line in lines:
-                line = line.strip()
-                if not line:
-                    continue
-                # Check if line already has a speaker label [N]: or [Speaker N]:
-                if line.startswith('[') and ']:' in line:
-                    processed_lines.append(line)
-                else:
-                    # Add default [1]: label
-                    processed_lines.append(f"[1]: {line}")
-            return '\n'.join(processed_lines)
-
-        def extract_style_instructions(text):
-            """Extract style instructions from parentheses."""
-            import re
-            instructions = re.findall(r'\(([^)]+)\)', text)
-            clean_text = re.sub(r'\s*\([^)]+\)\s*', ' ', text)
-            clean_text = ' '.join(clean_text.split())
-            combined_instruct = ', '.join(instructions) if instructions else ''
-            return clean_text, combined_instruct
-
-        def generate_conversation_handler(conversation_data, qwen_voice_1, qwen_voice_2, qwen_voice_3, qwen_voice_4,
-                                          pause_linebreak, pause_period, pause_comma,
-                                          pause_question, pause_hyphen, language, seed, model_size,
-                                          do_sample, temperature, top_k, top_p, repetition_penalty, max_new_tokens,
-                                          progress=gr.Progress()):
-            """Generate multi-speaker conversation with Qwen Speakers preset speakers."""
-            if not conversation_data or not conversation_data.strip():
-                return None, "❌ Please enter conversation lines.", "", gr.update()
-
-            conversation_data = preprocess_conversation_script(conversation_data)
-
-            # Build speaker mapping from dropdown selections
-            voice_inputs = [qwen_voice_1, qwen_voice_2, qwen_voice_3, qwen_voice_4]
-            speaker_voices = {}
-            for i, voice_name in enumerate(voice_inputs, 1):
-                if voice_name:
-                    speaker_voices[i] = voice_name
-
-            if not speaker_voices:
-                return None, "❌ Please assign at least one voice.", "", gr.update()
-
-            try:
-                # Parse conversation lines
-                lines = []
-                for line in conversation_data.strip().split('\n'):
-                    line = line.strip()
-                    if not line or ':' not in line:
-                        continue
-
-                    if line.startswith('[') and ']' in line:
-                        bracket_end = line.index(']')
-                        bracket_content = line[1:bracket_end].strip()
-                        text = line[bracket_end + 1:].lstrip(':').strip()
-
-                        if bracket_content.isdigit():
-                            speaker_num = int(bracket_content)
-                            if speaker_num in speaker_voices and text:
-                                lines.append((speaker_voices[speaker_num], text))
-
-                if not lines:
-                    return None, "❌ No valid conversation lines found. Use format: [N]: Text (N=1-4)", "", gr.update()
-
-                # Set seed
-                seed = int(seed) if seed is not None else -1
-                if seed < 0:
-                    seed = random.randint(0, 2147483647)
-                set_seed(seed)
-
-                progress(0.1, desc=f"Loading CustomVoice model ({model_size})...")
-                model = tts_manager.get_qwen3_custom_voice(model_size)
-
-                # Generate all lines with pause control
-                all_segments = []
-                sr = None
-                pause_pattern = re.compile(r'\[break=([\d\.]+)\]')
-
-                for i, (speaker, text) in enumerate(lines):
-                    progress_val = 0.1 + (0.8 * i / len(lines))
-                    clean_text, style_instruct = extract_style_instructions(text)
-
-                    # Insert pause markers
-                    if pause_period > 0:
-                        clean_text = re.sub(r'\.(?!\d)', f'. [break={pause_period}]', clean_text)
-                    if pause_comma > 0:
-                        clean_text = re.sub(r',(?!\d)', f', [break={pause_comma}]', clean_text)
-                    if pause_question > 0:
-                        clean_text = re.sub(r'\?(?!\d)', f'? [break={pause_question}]', clean_text)
-                    if pause_hyphen > 0:
-                        clean_text = re.sub(r'-(?!\d)', f'- [break={pause_hyphen}]', clean_text)
-
-                    parts = pause_pattern.split(clean_text)
-
-                    if style_instruct:
-                        progress(progress_val, desc=f"Line {i + 1}/{len(lines)} [{style_instruct[:15]}...]")
-                    else:
-                        progress(progress_val, desc=f"Line {i + 1}/{len(lines)} ({speaker})")
-
-                    # Generate segments
-                    for j in range(0, len(parts), 2):
-                        segment_text = parts[j].strip()
-                        if not segment_text:
-                            continue
-                        segment_text = pause_pattern.sub('', segment_text).strip()
-                        if not segment_text:
-                            continue
-
-                        kwargs = {
-                            "text": segment_text,
-                            "language": language if language != "Auto" else "Auto",
-                            "speaker": speaker,
-                            "do_sample": do_sample,
-                            "temperature": temperature,
-                            "top_k": top_k,
-                            "top_p": top_p,
-                            "repetition_penalty": repetition_penalty,
-                            "max_new_tokens": max_new_tokens
-                        }
-                        if style_instruct:
-                            kwargs["instruct"] = style_instruct
-
-                        wavs, sr = model.generate_custom_voice(**kwargs)
-
-                        segment_pause = 0.0
-                        if j + 1 < len(parts):
-                            try:
-                                segment_pause = float(parts[j + 1])
-                            except ValueError:
-                                pass
-
-                        all_segments.append((wavs[0], segment_pause))
-
-                    # Add linebreak pause
-                    if i < len(lines) - 1 and all_segments:
-                        last_wav, last_pause = all_segments[-1]
-                        all_segments[-1] = (last_wav, last_pause + pause_linebreak)
-
-                # Concatenate
-                progress(0.9, desc="Stitching conversation...")
-                conversation_audio = []
-                for wav, pause_duration in all_segments:
-                    conversation_audio.append(wav)
-                    if pause_duration > 0:
-                        pause_samples = int(sr * pause_duration)
-                        conversation_audio.append(np.zeros(pause_samples))
-
-                final_audio = np.concatenate(conversation_audio)
-
-                # Save
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename_stem = f"conversation_qwen3_{timestamp}"
-                speakers_used = list(set(s for s, _ in lines))
-                metadata = dedent(f"""\
-                    Generated: {timestamp}
-                    Type: Qwen3-TTS Conversation
-                    Model: CustomVoice {model_size}
-                    Language: {language}
-                    Seed: {seed}
-                    Pause Settings:
-                      - Linebreak: {pause_linebreak}s
-                      - Period: {pause_period}s
-                      - Comma: {pause_comma}s
-                      - Question: {pause_question}s
-                      - Hyphen: {pause_hyphen}s
-                    Speakers: {', '.join(speakers_used)}
-                    Lines: {len(lines)}
-                    Segments: {len(all_segments)}
-
-                    --- Script ---
-                    {conversation_data.strip()}
-                    """)
-                metadata_out = '\n'.join(line.lstrip() for line in metadata.lstrip().splitlines())
-                duration = len(final_audio) / sr
-                status_msg = f"Conversation generated.\n{len(lines)} lines | {duration:.1f}s | Seed: {seed} | {model_size}"
-                return finalize_conversation_output(final_audio, sr, filename_stem, metadata_out, status_msg, progress)
-
-            except Exception as e:
-                return None, f"❌ Error generating conversation: {str(e)}", "", gr.update()
-
-        def generate_conversation_base_handler(conversation_data, voice_samples_dict, pause_linebreak,
-                                               pause_period, pause_comma, pause_question, pause_hyphen,
-                                               language, seed, model_size, do_sample, temperature, top_k,
-                                               top_p, repetition_penalty, max_new_tokens, emotion_intensity,
-                                               progress=gr.Progress()):
-            """Generate multi-speaker conversation with Qwen Base + custom voice samples."""
-            if not conversation_data or not conversation_data.strip():
-                return None, "❌ Please enter conversation lines.", "", gr.update()
-
-            if not voice_samples_dict:
-                return None, "❌ Please select at least one voice sample.", "", gr.update()
-
-            conversation_data = preprocess_conversation_script(conversation_data)
-
-            try:
-                # Parse lines
-                lines = []
-                for line in conversation_data.strip().split('\n'):
-                    line = line.strip()
-                    if not line or ':' not in line:
-                        continue
-
-                    if line.startswith('[') and ']' in line:
-                        bracket_end = line.index(']')
-                        bracket_content = line[1:bracket_end].strip()
-                        text = line[bracket_end + 1:].lstrip(':').strip()
-
-                        if bracket_content.isdigit():
-                            speaker_num = int(bracket_content)
-                            if 1 <= speaker_num <= 4:
-                                speaker_key = f"Speaker{speaker_num}"
-                                if speaker_key in voice_samples_dict and text:
-                                    sample_data = voice_samples_dict[speaker_key]
-                                    lines.append((speaker_key, sample_data["wav_path"], sample_data["ref_text"], text))
-
-                if not lines:
-                    return None, "❌ No valid conversation lines found. Use format: [N]: Text (N=1-4)", "", gr.update()
-
-                # Set seed
-                seed = int(seed) if seed is not None else -1
-                if seed < 0:
-                    seed = random.randint(0, 2147483647)
-                set_seed(seed)
-
-
-                progress(0.1, desc=f"Loading Base model ({model_size})...")
-                model = tts_manager.get_qwen3_base(model_size)
-                is_faster = hasattr(model, 'talker_graph')
-
-                # Generate all segments
-                all_segments = []
-                sr = None
-                pause_pattern = re.compile(r'\[break=([\d\.]+)\]')
-
-                for i, (speaker_key, voice_sample_path, ref_text, text) in enumerate(lines):
-                    progress_val = 0.1 + (0.8 * i / len(lines))
-                    clean_text, detected_emotion = extract_style_instructions(text)
-
-                    # Apply emotion adjustments
-                    emotion_key = detected_emotion.lower().replace(" ", "_").replace(",", "").strip() if detected_emotion else None
-                    line_temp = temperature
-                    line_top_p = top_p
-                    line_rep_pen = repetition_penalty
-
-                    if emotion_key and emotion_key in _active_emotions:
-                        adjustments = _active_emotions[emotion_key]
-                        line_temp = max(0.1, min(2.0, temperature + (adjustments["temp"] * emotion_intensity)))
-                        line_top_p = max(0.0, min(1.0, top_p + (adjustments["top_p"] * emotion_intensity)))
-                        line_rep_pen = max(1.0, min(2.0, repetition_penalty + (adjustments["penalty"] * emotion_intensity)))
-                        progress(progress_val, desc=f"Line {i + 1}/{len(lines)} ({speaker_key}) [{emotion_key}]")
-                    else:
-                        progress(progress_val, desc=f"Line {i + 1}/{len(lines)} ({speaker_key})")
-
-                    text = clean_text
-
-                    # Insert pause markers
-                    if pause_period > 0:
-                        text = re.sub(r'\.(?!\d)', f'. [break={pause_period}]', text)
-                    if pause_comma > 0:
-                        text = re.sub(r',(?!\d)', f', [break={pause_comma}]', text)
-                    if pause_question > 0:
-                        text = re.sub(r'\?(?!\d)', f'? [break={pause_question}]', text)
-                    if pause_hyphen > 0:
-                        text = re.sub(r'-(?!\d)', f'- [break={pause_hyphen}]', text)
-
-                    parts = pause_pattern.split(text)
-
-                    # Get voice prompt (cached if available) — skip for FasterQwen3TTS (uses ref_audio directly)
-                    voice_prompt = None
-                    if not is_faster and get_or_create_voice_prompt:
-                        voice_prompt = get_or_create_voice_prompt(model, speaker_key, voice_sample_path, ref_text, model_size)
-
-                    # Generate segments
-                    for j in range(0, len(parts), 2):
-                        segment_text = parts[j].strip()
-                        if not segment_text:
-                            continue
-                        segment_text = pause_pattern.sub('', segment_text).strip()
-                        if not segment_text:
-                            continue
-
-                        gen_kwargs = dict(
-                            text=segment_text,
-                            language=language if language != "Auto" else "auto",
-                            ref_audio=voice_sample_path,
-                            ref_text=ref_text,
-                            do_sample=do_sample,
-                            temperature=line_temp,
-                            top_k=top_k,
-                            top_p=line_top_p,
-                            repetition_penalty=line_rep_pen,
-                            max_new_tokens=max_new_tokens
-                        )
-                        if is_faster:
-                            gen_kwargs['xvec_only'] = False
-                        else:
-                            gen_kwargs['voice_prompt'] = voice_prompt
-                        wavs, sr = model.generate_voice_clone(**gen_kwargs)
-
-                        segment_pause = 0.0
-                        if j + 1 < len(parts):
-                            try:
-                                segment_pause = float(parts[j + 1])
-                            except ValueError:
-                                pass
-
-                        all_segments.append((wavs[0], segment_pause))
-
-                    # Add linebreak pause
-                    if i < len(lines) - 1 and all_segments:
-                        last_wav, last_pause = all_segments[-1]
-                        all_segments[-1] = (last_wav, last_pause + pause_linebreak)
-
-                # Concatenate
-                progress(0.9, desc="Stitching conversation...")
-                conversation_audio = []
-                for wav, pause_duration in all_segments:
-                    conversation_audio.append(wav)
-                    if pause_duration > 0:
-                        pause_samples = int(sr * pause_duration)
-                        conversation_audio.append(np.zeros(pause_samples))
-
-                final_audio = np.concatenate(conversation_audio)
-
-                # Save
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename_stem = f"conversation_qwen_base_{timestamp}"
-                speakers_used = list(set(k for k, _, _, _ in lines))
-                metadata = dedent(f"""\
-                    Generated: {timestamp}
-                    Type: Qwen3-TTS Conversation (Base Model + Custom Voices)
-                    Model: Base {model_size}
-                    Language: {language}
-                    Seed: {seed}
-                    Pause Settings:
-                      - Linebreak: {pause_linebreak}s
-                      - Period: {pause_period}s
-                      - Comma: {pause_comma}s
-                      - Question: {pause_question}s
-                      - Hyphen: {pause_hyphen}s
-                    Speakers: {', '.join(speakers_used)}
-                    Lines: {len(lines)}
-                    Segments: {len(all_segments)}
-
-                    --- Script ---
-                    {conversation_data.strip()}
-                    """)
-                metadata_out = '\n'.join(line.lstrip() for line in metadata.lstrip().splitlines())
-                duration = len(final_audio) / sr
-                status_msg = f"Conversation generated.\n{len(lines)} lines | {duration:.1f}s | Seed: {seed} | Base {model_size}"
-                return finalize_conversation_output(final_audio, sr, filename_stem, metadata_out, status_msg, progress)
-
-            except Exception as e:
-                import traceback
-                print(f"Error in generate_conversation_base_handler:\n{traceback.format_exc()}")
-                return None, f"❌ Error generating conversation: {str(e)}", "", gr.update()
-
-        def generate_vibevoice_longform_handler(script_text, voice_samples_dict, model_size, cfg_scale, seed,
-                                                num_steps, do_sample, temperature, top_k, top_p, repetition_penalty,
-                                                paragraph_per_chunk=False, progress=gr.Progress()):
-            """Generate long-form multi-speaker audio with VibeVoice (up to 90 min)."""
-            if not script_text or not script_text.strip():
-                return None, "❌ Please enter a script.", "", gr.update()
-
-            script_text = preprocess_conversation_script(script_text)
-
-            try:
-                # Set seed
-                seed = int(seed) if seed is not None else -1
-                if seed < 0:
-                    seed = random.randint(0, 2147483647)
-                set_seed(seed)
-
-                progress(0.1, desc=f"Loading VibeVoice TTS ({model_size})...")
-                model = tts_manager.get_vibevoice_tts(model_size)
-
-                # Import processor
-                from vibevoice_tts.processor.vibevoice_processor import VibeVoiceProcessor
-                import warnings
-                import logging
-
-                # Map model size
-                if model_size == "Large (4-bit)":
-                    model_path = "FranckyB/VibeVoice-Large-4bit"
-                else:
-                    model_path = f"FranckyB/VibeVoice-{model_size}"
-
-                # Suppress tokenizer warning
-                prev_level = logging.getLogger("transformers.tokenization_utils_base").level
-                logging.getLogger("transformers.tokenization_utils_base").setLevel(logging.ERROR)
-
-                with warnings.catch_warnings():
-                    warnings.filterwarnings("ignore", category=UserWarning)
-                    processor = VibeVoiceProcessor.from_pretrained(model_path, local_files_only=False)
-
-                logging.getLogger("transformers.tokenization_utils_base").setLevel(prev_level)
-
-                # Parse script
-                progress(0.3, desc="Processing script...")
-                lines = []
-                for line in script_text.strip().split('\n'):
-                    line = line.strip()
-                    if not line or ':' not in line:
-                        continue
-
-                    if line.startswith('[') and ']' in line:
-                        bracket_end = line.index(']')
-                        bracket_content = line[1:bracket_end].strip()
-                        text = line[bracket_end + 1:].lstrip(':').strip()
-
-                        if bracket_content.isdigit():
-                            speaker_num = int(bracket_content)
-                            if text:
-                                wrapped_num = ((speaker_num - 1) % 4) + 1
-                                lines.append((f"Speaker{wrapped_num}", text, speaker_num))
-
-                # Build voice samples list
-                available_samples = []
-                for i in range(1, 5):
-                    speaker_key = f"Speaker{i}"
-                    if speaker_key in voice_samples_dict and voice_samples_dict[speaker_key]:
-                        sample_data = voice_samples_dict[speaker_key]
-                        wav_path = sample_data["wav_path"] if isinstance(sample_data, dict) else sample_data
-                        available_samples.append((speaker_key, wav_path))
-
-                if not available_samples:
-                    return None, "❌ Please provide at least one voice sample (Speaker1).", "", gr.update()
-
-                voice_samples = [sample for _, sample in available_samples]
-                speaker_to_sample = {speaker: idx for idx, (speaker, _) in enumerate(available_samples)}
-
-                # Format script for VibeVoice (0-based)
-                formatted_lines = []
-                for speaker, text, original_num in lines:
-                    if speaker in speaker_to_sample:
-                        vv_speaker_num = speaker_to_sample[speaker]
-                        clean_text, _ = extract_style_instructions(text)
-                        formatted_lines.append(f"Speaker {vv_speaker_num}: {clean_text}")
-
-                formatted_script = '\n'.join(formatted_lines)
-
-                # Process inputs
-                inputs = processor(
-                    text=[formatted_script],
-                    voice_samples=[voice_samples],
-                    padding=True,
-                    return_tensors="pt",
-                    return_attention_mask=True,
-                )
-
-                # Move to device
-                device = get_device()
-                for k, v in inputs.items():
-                    if torch.is_tensor(v):
-                        inputs[k] = v.to(device)
-
-                progress(0.5, desc="Generating audio...")
-
-                # Build generation config
-                gen_config = {'do_sample': do_sample}
-                if do_sample:
-                    gen_config['temperature'] = temperature
-                    if top_k > 0:
-                        gen_config['top_k'] = int(top_k)
-                    if top_p < 1.0:
-                        gen_config['top_p'] = top_p
-                    if repetition_penalty != 1.0:
-                        gen_config['repetition_penalty'] = repetition_penalty
-
-                model.set_ddpm_inference_steps(num_steps=num_steps)
-                sr = 24000
-
-                # Chunked generation: split by voice switches to prevent
-                # quality degradation (screaming/rushing) on long conversations.
-                if paragraph_per_chunk and len(formatted_lines) > 1:
-                    import numpy as np
-                    # Group consecutive lines by the same speaker
-                    chunks = []
-                    current_chunk = [formatted_lines[0]]
-                    current_speaker = formatted_lines[0].split(":")[0]
-
-                    for line in formatted_lines[1:]:
-                        speaker = line.split(":")[0]
-                        if speaker != current_speaker:
-                            chunks.append(current_chunk)
-                            current_chunk = [line]
-                            current_speaker = speaker
-                        else:
-                            current_chunk.append(line)
-                    chunks.append(current_chunk)
-
-                    print(f"VibeVoice conversation chunking: {len(chunks)} chunks (by voice switch)")
-                    audio_segments = []
-
-                    for idx, chunk_lines in enumerate(chunks):
-                        chunk_script = '\n'.join(chunk_lines)
-                        progress_val = 0.5 + (0.4 * idx / len(chunks))
-                        progress(progress_val, desc=f"Generating chunk {idx + 1}/{len(chunks)}...")
-
-                        chunk_inputs = processor(
-                            text=[chunk_script],
-                            voice_samples=[voice_samples],
-                            padding=True,
-                            return_tensors="pt",
-                            return_attention_mask=True,
-                        )
-
-                        for k, v in chunk_inputs.items():
-                            if torch.is_tensor(v):
-                                chunk_inputs[k] = v.to(device)
-
-                        _chunk_start = 0.5 + (0.4 * idx / len(chunks))
-                        _chunk_end = 0.5 + (0.4 * (idx + 1) / len(chunks))
-                        outputs = model.generate(
-                            **chunk_inputs,
-                            max_new_tokens=None,
-                            cfg_scale=cfg_scale,
-                            tokenizer=processor.tokenizer,
-                            generation_config=gen_config,
-                            verbose=False,
-                            progress_callback=progress,
-                            progress_start=_chunk_start,
-                            progress_end=_chunk_end,
-                        )
-
-                        if outputs.speech_outputs and outputs.speech_outputs[0] is not None:
-                            audio_tensor = outputs.speech_outputs[0].cpu().to(torch.float32)
-                            audio_segments.append(audio_tensor.squeeze().numpy())
-                            print(f"  Chunk {idx + 1}/{len(chunks)} done ({len(chunk_lines)} lines)")
-                        else:
-                            print(f"  Chunk {idx + 1}/{len(chunks)} produced no audio, skipping")
-
-                    if not audio_segments:
-                        return None, "❌ VibeVoice failed to generate audio for any chunk", "", gr.update()
-
-                    generated_audio = np.concatenate(audio_segments)
-
-                else:
-                    # Standard single-pass generation
-                    outputs = model.generate(
-                        **inputs,
-                        max_new_tokens=None,
-                        cfg_scale=cfg_scale,
-                        tokenizer=processor.tokenizer,
-                        generation_config=gen_config,
-                        verbose=False,
-                        progress_callback=progress,
-                        progress_start=0.5,
-                        progress_end=0.9,
-                    )
-
-                    if outputs.speech_outputs and outputs.speech_outputs[0] is not None:
-                        audio_tensor = outputs.speech_outputs[0].cpu().to(torch.float32)
-                        generated_audio = audio_tensor.squeeze().numpy()
-                    else:
-                        return None, "❌ No audio generated", "", gr.update()
-
-                progress(0.9, desc="Saving audio...")
-
-                if generated_audio is not None:
-
-                    # Save
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    filename_stem = f"Conversation_vibevoice_{timestamp}"
-                    duration = len(generated_audio) / sr
-                    chunk_info = "Chunking: By voice switch" if paragraph_per_chunk else "Chunking: Off"
-                    metadata = dedent(f"""\
-                        Generated: {timestamp}
-                        Type: VibeVoice Conversation
-                        Model: VibeVoice-{model_size}
-                        Seed: {seed}
-                        CFG Scale: {cfg_scale}
-                        {chunk_info}
-                        Lines: {len(lines)}
-                        Speakers: {len(available_samples)}
-
-                        --- Script ---
-                        {script_text.strip()}
-                        """)
-                    metadata_out = '\n'.join(line.lstrip() for line in metadata.lstrip().splitlines())
-                    status_msg = f"Conversation generated.\n{len(lines)} lines | {duration:.1f}s | Seed: {seed}"
-                    return finalize_conversation_output(generated_audio, sr, filename_stem, metadata_out, status_msg, progress)
-
-            except Exception as e:
-                import traceback
-                print(f"Error in generate_vibevoice_longform_handler:\n{traceback.format_exc()}")
-                return None, f"❌ Error generating conversation: {str(e)}", "", gr.update()
-
-        def generate_luxtts_conversation_handler(
-            conversation_data, voice_samples_dict,
-            pause_linebreak, seed,
-            num_steps, t_shift, speed, guidance_scale,
-            rms, ref_duration, return_smooth,
-            progress=gr.Progress()
-        ):
-            """Generate multi-speaker conversation with LuxTTS voice cloning.
-
-            Each line is generated sequentially with per-speaker voice prompts (cached),
-            then stitched together with configurable pauses between speaker turns.
-            """
-            if not conversation_data or not conversation_data.strip():
-                return None, "❌ Please enter conversation lines.", "", gr.update()
-
-            if not voice_samples_dict:
-                return None, "❌ Please select at least one voice sample.", "", gr.update()
-
-            # Check all samples have transcripts
-            transcript_error = validate_samples_have_transcripts(voice_samples_dict)
-            if transcript_error:
-                return None, f"❌ {transcript_error}", "", gr.update()
-
-            conversation_data = preprocess_conversation_script(conversation_data)
-
-            try:
-                # Parse lines
-                lines = []
-                for line in conversation_data.strip().split('\n'):
-                    line = line.strip()
-                    if not line or ':' not in line:
-                        continue
-
-                    if line.startswith('[') and ']' in line:
-                        bracket_end = line.index(']')
-                        bracket_content = line[1:bracket_end].strip()
-                        text = line[bracket_end + 1:].lstrip(':').strip()
-
-                        if bracket_content.isdigit():
-                            speaker_num = int(bracket_content)
-                            if 1 <= speaker_num <= 4:
-                                speaker_key = f"Speaker{speaker_num}"
-                                if speaker_key in voice_samples_dict and text:
-                                    sample_data = voice_samples_dict[speaker_key]
-                                    lines.append((speaker_key, sample_data["wav_path"], sample_data.get("name", speaker_key), text, sample_data.get("ref_text", "")))
-
-                if not lines:
-                    return None, "❌ No valid conversation lines found. Use format: [N]: Text (N=1-4)", "", gr.update()
-
-                # Set seed
-                seed = int(seed) if seed is not None else -1
-                if seed < 0:
-                    seed = random.randint(0, 2147483647)
-                set_seed(seed)
-
-                progress(0.05, desc="Loading LuxTTS model...")
-                tts_manager.get_luxtts()
-
-                # Generate all segments
-                all_segments = []
-                sr = 48000  # LuxTTS outputs at 48kHz
-
-                for i, (speaker_key, wav_path, sample_name, text, ref_text) in enumerate(lines):
-                    progress_val = 0.1 + (0.8 * i / len(lines))
-
-                    # Strip any (style) markers — LuxTTS doesn't support them
-                    clean_text, _ = extract_style_instructions(text)
-                    if not clean_text.strip():
-                        continue
-
-                    progress(progress_val, desc=f"Line {i + 1}/{len(lines)} ({speaker_key})")
-
-                    audio_data, audio_sr, was_cached = tts_manager.generate_voice_clone_luxtts(
-                        text=clean_text,
-                        voice_sample_path=wav_path,
-                        sample_name=sample_name,
-                        num_steps=num_steps,
-                        t_shift=t_shift,
-                        speed=speed,
-                        return_smooth=return_smooth,
-                        rms=rms,
-                        ref_duration=ref_duration,
-                        guidance_scale=guidance_scale,
-                        seed=seed,
-                        ref_text=ref_text or None,
-                    )
-                    sr = audio_sr  # Should be 48000
-
-                    # Add segment with linebreak pause after (except last line)
-                    line_pause = pause_linebreak if i < len(lines) - 1 else 0.0
-                    all_segments.append((audio_data, line_pause))
-
-                if not all_segments:
-                    return None, "❌ No audio segments generated.", "", gr.update()
-
-                # Concatenate
-                progress(0.9, desc="Stitching conversation...")
-                conversation_audio = []
-                for wav, pause_duration in all_segments:
-                    conversation_audio.append(wav)
-                    if pause_duration > 0:
-                        pause_samples = int(sr * pause_duration)
-                        conversation_audio.append(np.zeros(pause_samples))
-
-                # Add short tail silence so the last utterance doesn't clip
-                conversation_audio.append(np.zeros(int(sr * 0.15)))
-
-                final_audio = np.concatenate(conversation_audio)
-
-                # Save
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename_stem = f"conversation_luxtts_{timestamp}"
-                speakers_used = list(set(k for k, _, _, _, _ in lines))
-                metadata = dedent(f"""\
-                    Generated: {timestamp}
-                    Type: LuxTTS Conversation
-                    Seed: {seed}
-                    Sample Rate: {sr}Hz
-                    Pause Between Lines: {pause_linebreak}s
-                    Steps: {num_steps} | t_shift: {t_shift} | Speed: {speed}
-                    Guidance Scale: {guidance_scale} | RMS: {rms} | Ref Duration: {ref_duration}s
-                    Return Smooth: {return_smooth}
-                    Speakers: {', '.join(speakers_used)}
-                    Lines: {len(lines)}
-                    Segments: {len(all_segments)}
-
-                    --- Script ---
-                    {conversation_data.strip()}
-                    """)
-                metadata_out = '\n'.join(line.lstrip() for line in metadata.lstrip().splitlines())
-                duration = len(final_audio) / sr
-                status_msg = f"Conversation generated.\n{len(lines)} lines | {duration:.1f}s | Seed: {seed} | LuxTTS"
-                return finalize_conversation_output(final_audio, sr, filename_stem, metadata_out, status_msg, progress)
-
-            except Exception as e:
-                import traceback
-                print(f"Error in generate_luxtts_conversation_handler:\n{traceback.format_exc()}")
-                return None, f"Error generating LuxTTS conversation: {str(e)}", "", gr.update()
-
-        def generate_chatterbox_conversation_handler(
-            conversation_data, voice_samples_dict,
-            pause_linebreak, language, seed,
-            exaggeration, cfg_weight, temperature, repetition_penalty, top_p,
-            progress=gr.Progress()
-        ):
-            """Generate multi-speaker conversation with Chatterbox voice cloning.
-
-            Each line is generated sequentially with per-speaker voice samples,
-            then stitched together with configurable pauses between speaker turns.
-            English uses the fast default model; other languages use Multilingual.
-            """
-            if not conversation_data or not conversation_data.strip():
-                return None, "❌ Please enter conversation lines.", "", gr.update()
-
-            if not voice_samples_dict:
-                return None, "❌ Please select at least one voice sample.", "", gr.update()
-
-            conversation_data = preprocess_conversation_script(conversation_data)
-
-            try:
-                from modules.core_components.constants import CHATTERBOX_LANG_TO_CODE
-
-                # Parse lines
-                lines = []
-                for line in conversation_data.strip().split('\n'):
-                    line = line.strip()
-                    if not line or ':' not in line:
-                        continue
-
-                    if line.startswith('[') and ']' in line:
-                        bracket_end = line.index(']')
-                        bracket_content = line[1:bracket_end].strip()
-                        text = line[bracket_end + 1:].lstrip(':').strip()
-
-                        if bracket_content.isdigit():
-                            speaker_num = int(bracket_content)
-                            if 1 <= speaker_num <= 4:
-                                speaker_key = f"Speaker{speaker_num}"
-                                if speaker_key in voice_samples_dict and text:
-                                    sample_data = voice_samples_dict[speaker_key]
-                                    lines.append((speaker_key, sample_data["wav_path"], sample_data.get("name", speaker_key), text))
-
-                if not lines:
-                    return None, "❌ No valid conversation lines found. Use format: [N]: Text (N=1-4)", "", gr.update()
-
-                # Set seed
-                seed = int(seed) if seed is not None else -1
-                if seed < 0:
-                    seed = random.randint(0, 2147483647)
-                set_seed(seed)
-
-                # Determine if multilingual
-                lang_code = CHATTERBOX_LANG_TO_CODE.get(language, "en")
-                use_multilingual = lang_code != "en"
-                model_label = "Multilingual" if use_multilingual else "Default"
-
-                if use_multilingual:
-                    progress(0.05, desc="Loading Chatterbox Multilingual...")
-                    tts_manager.get_chatterbox_multilingual()
-                else:
-                    progress(0.05, desc="Loading Chatterbox TTS...")
-                    tts_manager.get_chatterbox_tts()
-
-                # Generate all segments
-                all_segments = []
-                sr = 24000
-
-                for i, (speaker_key, wav_path, sample_name, text) in enumerate(lines):
-                    progress_val = 0.1 + (0.8 * i / len(lines))
-
-                    # Strip any (style) markers
-                    clean_text, _ = extract_style_instructions(text)
-                    if not clean_text.strip():
-                        continue
-
-                    progress(progress_val, desc=f"Line {i + 1}/{len(lines)} ({speaker_key})")
-
-                    if use_multilingual:
-                        audio_data, audio_sr = tts_manager.generate_voice_clone_chatterbox_multilingual(
-                            text=clean_text,
-                            language_code=lang_code,
-                            voice_sample_path=wav_path,
-                            seed=seed,
-                            exaggeration=exaggeration,
-                            cfg_weight=cfg_weight,
-                            temperature=temperature,
-                            repetition_penalty=repetition_penalty,
-                            top_p=top_p,
-                        )
-                    else:
-                        audio_data, audio_sr = tts_manager.generate_voice_clone_chatterbox(
-                            text=clean_text,
-                            voice_sample_path=wav_path,
-                            seed=seed,
-                            exaggeration=exaggeration,
-                            cfg_weight=cfg_weight,
-                            temperature=temperature,
-                            repetition_penalty=repetition_penalty,
-                            top_p=top_p,
-                        )
-
-                    sr = audio_sr  # Should be 24000
-
-                    # Add segment with linebreak pause after (except last line)
-                    line_pause = pause_linebreak if i < len(lines) - 1 else 0.0
-                    all_segments.append((audio_data, line_pause))
-
-                if not all_segments:
-                    return None, "❌ No audio segments generated.", "", gr.update()
-
-                # Concatenate
-                progress(0.9, desc="Stitching conversation...")
-                conversation_audio = []
-                for wav, pause_duration in all_segments:
-                    conversation_audio.append(wav)
-                    if pause_duration > 0:
-                        pause_samples = int(sr * pause_duration)
-                        conversation_audio.append(np.zeros(pause_samples))
-
-                # Add short tail silence
-                conversation_audio.append(np.zeros(int(sr * 0.15)))
-
-                final_audio = np.concatenate(conversation_audio)
-
-                # Save
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename_stem = f"conversation_chatterbox_{timestamp}"
-                speakers_used = list(set(k for k, _, _, _ in lines))
-                metadata = dedent(f"""\
-                    Generated: {timestamp}
-                    Type: Chatterbox Conversation
-                    Model: {model_label}
-                    Language: {language}
-                    Seed: {seed}
-                    Sample Rate: {sr}Hz
-                    Pause Between Lines: {pause_linebreak}s
-                    Exaggeration: {exaggeration} | CFG Weight: {cfg_weight}
-                    Temperature: {temperature} | Repetition Penalty: {repetition_penalty} | Top-p: {top_p}
-                    Speakers: {', '.join(speakers_used)}
-                    Lines: {len(lines)}
-                    Segments: {len(all_segments)}
-
-                    --- Script ---
-                    {conversation_data.strip()}
-                    """)
-                metadata_out = '\n'.join(line.lstrip() for line in metadata.lstrip().splitlines())
-                duration = len(final_audio) / sr
-                status_msg = f"Conversation generated.\n{len(lines)} lines | {duration:.1f}s | Seed: {seed} | Chatterbox {model_label}"
-                return finalize_conversation_output(final_audio, sr, filename_stem, metadata_out, status_msg, progress)
-
-            except Exception as e:
-                import traceback
-                print(f"Error in generate_chatterbox_conversation_handler:\n{traceback.format_exc()}")
-                return None, f"Error generating Chatterbox conversation: {str(e)}", "", gr.update()
-
-        def unified_conversation_generate(
-            model_type, script,
-            # Shared voice samples (used by all sample-based engines)
-            sv1, sv2, sv3, sv4,
-            # Qwen Speakers params
-            qwen_speaker_1, qwen_speaker_2, qwen_speaker_3, qwen_speaker_4,
-            qwen_custom_pause_linebreak, qwen_custom_pause_period, qwen_custom_pause_comma,
-            qwen_custom_pause_question, qwen_custom_pause_hyphen, qwen_custom_model_size,
-            # Qwen Base params
-            qwen_base_pause_linebreak, qwen_base_pause_period, qwen_base_pause_comma, qwen_base_pause_question,
-            qwen_base_pause_hyphen, qwen_base_model_size,
-            # Shared Qwen
-            qwen_lang, qwen_seed, emotion_intensity,
-            # Qwen Custom Voice advanced params
-            qwen_custom_do_sample, qwen_custom_temperature, qwen_custom_top_k, qwen_custom_top_p,
-            qwen_custom_repetition_penalty, qwen_custom_max_new_tokens,
-            # Qwen Base advanced params
-            qwen_base_do_sample, qwen_base_temperature, qwen_base_top_k, qwen_base_top_p,
-            qwen_base_repetition_penalty, qwen_base_max_new_tokens,
-            # VibeVoice params
-            vv_model_size, vv_cfg,
-            # VibeVoice advanced params
-            vv_num_steps, vv_do_sample, vv_temperature, vv_top_k, vv_top_p, vv_repetition_penalty,
-            vv_sentences_per_chunk,
-            # LuxTTS params
-            lux_pause_linebreak,
-            lux_num_steps, lux_t_shift, lux_speed, lux_guidance_scale,
-            lux_rms, lux_ref_duration, lux_return_smooth,
-            # Chatterbox params
-            cb_pause_linebreak,
-            cb_exaggeration, cb_cfg_weight, cb_temperature, cb_repetition_penalty, cb_top_p,
-            # Shared
-            seed, progress=gr.Progress()
-        ):
-            """Route to appropriate generation function based on model type."""
-            voice_samples = prepare_voice_samples_dict(sv1, sv2, sv3, sv4)
-
-            if model_type == "Qwen Speakers":
-                qwen_size = "1.7B" if qwen_custom_model_size == "Large" else "0.6B"
-                return generate_conversation_handler(script, qwen_speaker_1, qwen_speaker_2, qwen_speaker_3, qwen_speaker_4,
-                                                     qwen_custom_pause_linebreak, qwen_custom_pause_period,
-                                                     qwen_custom_pause_comma, qwen_custom_pause_question,
-                                                     qwen_custom_pause_hyphen, qwen_lang, qwen_seed, qwen_size,
-                                                     qwen_custom_do_sample, qwen_custom_temperature, qwen_custom_top_k, qwen_custom_top_p,
-                                                     qwen_custom_repetition_penalty, qwen_custom_max_new_tokens, progress)
-            elif model_type == "Qwen Base":
-                qwen_size = "1.7B" if qwen_base_model_size == "Large" else "0.6B"
-                return generate_conversation_base_handler(script, voice_samples, qwen_base_pause_linebreak,
-                                                          qwen_base_pause_period, qwen_base_pause_comma,
-                                                          qwen_base_pause_question, qwen_base_pause_hyphen,
-                                                          qwen_lang, qwen_seed, qwen_size,
-                                                          qwen_base_do_sample, qwen_base_temperature, qwen_base_top_k, qwen_base_top_p,
-                                                          qwen_base_repetition_penalty, qwen_base_max_new_tokens,
-                                                          emotion_intensity, progress)
-            elif model_type == "LuxTTS":
-                return generate_luxtts_conversation_handler(script, voice_samples, lux_pause_linebreak,
-                                                            seed, lux_num_steps, lux_t_shift, lux_speed,
-                                                            lux_guidance_scale, lux_rms, lux_ref_duration,
-                                                            lux_return_smooth, progress)
-            elif model_type == "Chatterbox":
-                return generate_chatterbox_conversation_handler(script, voice_samples, cb_pause_linebreak,
-                                                                qwen_lang, seed,
-                                                                cb_exaggeration, cb_cfg_weight, cb_temperature,
-                                                                cb_repetition_penalty, cb_top_p, progress)
-            elif model_type == "VibeVoice":
-                if vv_model_size == "Small":
-                    vv_size = "1.5B"
-                elif vv_model_size == "Large (4-bit)":
-                    vv_size = "Large (4-bit)"
-                else:
-                    vv_size = "Large"
-                return generate_vibevoice_longform_handler(script, voice_samples, vv_size, vv_cfg, seed,
-                                                           vv_num_steps, vv_do_sample, vv_temperature, vv_top_k,
-                                                           vv_top_p, vv_repetition_penalty,
-                                                           vv_sentences_per_chunk, progress)
-
-        def _disable_conv_btn():
-            return gr.update(interactive=False)
-
-        def _enable_conv_btn():
-            return gr.update(interactive=True)
-
-        # Event handlers
-        components['conv_generate_btn'].click(
-            _disable_conv_btn, outputs=[components['conv_generate_btn']]
-        ).then(
-            restore_fn, outputs=restore_outputs
-        ).then(
-            unified_conversation_generate,
-            inputs=[
-                components['conv_model_type'], components['conversation_script'],
-                # Shared voice samples (4 speakers)
-                components['conv_voice_1'], components['conv_voice_2'], components['conv_voice_3'], components['conv_voice_4'],
-                # Qwen Speakers (preset voice dropdowns)
-                components['qwen_speaker_voice_1'], components['qwen_speaker_voice_2'],
-                components['qwen_speaker_voice_3'], components['qwen_speaker_voice_4'],
-                components['conv_pause_linebreak'], components['conv_pause_period'], components['conv_pause_comma'],
-                components['conv_pause_question'], components['conv_pause_hyphen'], components['conv_model_size'],
-                # Qwen Base
-                components['conv_pause_linebreak'], components['conv_pause_period'], components['conv_pause_comma'],
-                components['conv_pause_question'], components['conv_pause_hyphen'], components['conv_base_model_size'],
-                # Shared Qwen
-                components['conv_language'], components['conv_seed'], components['conv_emotion_intensity'],
-                # Qwen Custom Voice advanced params
-                components['qwen_custom_conv_do_sample'], components['qwen_custom_conv_temperature'],
-                components['qwen_custom_conv_top_k'], components['qwen_custom_conv_top_p'],
-                components['qwen_custom_conv_repetition_penalty'], components['qwen_custom_conv_max_new_tokens'],
-                # Qwen Base advanced params
-                components['qwen_base_conv_do_sample'], components['qwen_base_conv_temperature'],
-                components['qwen_base_conv_top_k'], components['qwen_base_conv_top_p'],
-                components['qwen_base_conv_repetition_penalty'], components['qwen_base_conv_max_new_tokens'],
-                # VibeVoice
-                components['longform_model_size'], components['longform_cfg_scale'],
-                # VibeVoice advanced params
-                components['vv_conv_num_steps'], components['vv_conv_do_sample'], components['vv_conv_temperature'], components['vv_conv_top_k'],
-                components['vv_conv_top_p'], components['vv_conv_repetition_penalty'],
-                components['vv_conv_paragraph_per_chunk'],
-                # LuxTTS
-                components['luxtts_pause_linebreak'],
-                components['lux_conv_num_steps'], components['lux_conv_t_shift'], components['lux_conv_speed'], components['lux_conv_guidance_scale'],
-                components['lux_conv_rms'], components['lux_conv_ref_duration'], components['lux_conv_return_smooth'],
-                # Chatterbox
-                components['cb_pause_linebreak'],
-                components['cb_conv_exaggeration'], components['cb_conv_cfg_weight'], components['cb_conv_temperature'],
-                components['cb_conv_repetition_penalty'], components['cb_conv_top_p'],
-                # Shared
-                components['conv_seed']
-            ],
-            outputs=[components['conv_output_audio'], components['conv_status'], components['_conv_result_metadata'], components['conv_save_result_btn']]
-        ).then(
-            _enable_conv_btn, outputs=[components['conv_generate_btn']]
-        )
-
-        # Save result button handler
-        def conv_save_result_handler(audio_path, metadata_text):
-            """Save the temp result to output folder in chosen format."""
-            if not audio_path:
-                return "❌ No audio to save.", gr.update()
-            try:
-                output_format = _user_config.get("output_format", "wav")
-                output_path = save_result_to_output(audio_path, OUTPUT_DIR, output_format, metadata_text or None)
-                return f"Saved to: {output_path.name}", gr.update(interactive=False)
-            except Exception as e:
-                return f"❌ Error saving: {str(e)}", gr.update()
-
-        components['conv_save_result_btn'].click(
-            conv_save_result_handler,
-            inputs=[components['conv_output_audio'], components['_conv_result_metadata']],
-            outputs=[components['conv_status'], components['conv_save_result_btn']]
-        )
-
-        # Toggle UI based on model selection
-        def toggle_conv_ui(model_type):
-            from modules.core_components.constants import CHATTERBOX_LANGUAGES
-            is_qwen_custom = model_type == "Qwen Speakers"
-            is_qwen_base = model_type == "Qwen Base"
-            is_vibevoice = model_type == "VibeVoice"
-            is_luxtts = model_type == "LuxTTS"
-            is_chatterbox = model_type == "Chatterbox"
-            is_qwen = is_qwen_custom or is_qwen_base
-            uses_samples = is_qwen_base or is_luxtts or is_chatterbox or is_vibevoice
-
-            # Language dropdown: full list for Qwen, Chatterbox languages for Chatterbox, Auto-only for VV/LuxTTS
-            if is_qwen:
-                lang_update = gr.update(choices=LANGUAGES, value=LANGUAGES[0])
-            elif is_chatterbox:
-                lang_update = gr.update(choices=CHATTERBOX_LANGUAGES, value="English")
-            else:
-                lang_update = gr.update(choices=["Auto"], value="Auto")
-
-            return {
-                components['qwen_speakers_voices_section']: gr.update(visible=is_qwen_custom),
-                components['shared_voices_section']: gr.update(visible=uses_samples),
-                components['qwen_custom_settings']: gr.update(visible=is_qwen_custom),
-                components['qwen_base_settings']: gr.update(visible=is_qwen_base),
-                components['qwen_pause_controls']: gr.update(visible=is_qwen),
-                components['qwen_custom_conv_advanced']: gr.update(visible=is_qwen_custom),
-                components['qwen_base_conv_advanced']: gr.update(visible=is_qwen_base),
-                components['luxtts_settings']: gr.update(visible=is_luxtts),
-                components['vibevoice_settings']: gr.update(visible=is_vibevoice),
-                components['cb_settings']: gr.update(visible=is_chatterbox),
-                components['qwen_custom_tips']: gr.update(visible=is_qwen_custom),
-                components['qwen_base_tips']: gr.update(visible=is_qwen_base),
-                components['vibevoice_tips']: gr.update(visible=is_vibevoice),
-                components['luxtts_tips']: gr.update(visible=is_luxtts),
-                components['cb_tips']: gr.update(visible=is_chatterbox),
-                components['conv_language']: lang_update,
-                components['vv_model_size_row']: gr.update(visible=is_vibevoice),
-            }
-
-        # All sections start visible=True so Gradio renders their DOM.
-        # toggle_conv_ui on tab.select sets the correct visibility.
-        conv_section_outputs = [
-            components['qwen_speakers_voices_section'],
-            components['shared_voices_section'],
-            components['qwen_custom_settings'], components['qwen_base_settings'], components['qwen_pause_controls'],
-            components['qwen_custom_conv_advanced'], components['qwen_base_conv_advanced'],
-            components['luxtts_settings'],
-            components['vibevoice_settings'],
-            components['cb_settings'],
-            components['qwen_custom_tips'], components['qwen_base_tips'], components['vibevoice_tips'],
-            components['luxtts_tips'], components['cb_tips'],
-            components['conv_language'],
-            components['vv_model_size_row'],
-        ]
-
-        components['conv_model_type'].change(
-            toggle_conv_ui,
-            inputs=[components['conv_model_type']],
-            outputs=conv_section_outputs
-        )
-
-        # Refresh voice samples handler
-        def refresh_all_voice_samples():
-            """Refresh all shared voice sample dropdowns."""
-            updated_samples = get_sample_choices()
-            update = gr.update(choices=updated_samples)
-            return [update] * 4
-
-        # Auto-refresh all voice sample dropdowns when tab is selected, then set correct visibility
-        components['conv_tab'].select(
-            refresh_all_voice_samples,
-            outputs=[
-                components['conv_voice_1'], components['conv_voice_2'],
-                components['conv_voice_3'], components['conv_voice_4'],
-            ]
-        ).then(
-            toggle_conv_ui,
-            inputs=[components['conv_model_type']],
-            outputs=conv_section_outputs
-        )
-
-        # Restore saved params when accordion is opened
-        for acc_key in ['qwen_custom_conv_accordion', 'qwen_base_conv_accordion', 'vv_conv_accordion', 'lux_conv_accordion', 'cb_conv_accordion']:
-            acc = components.get(acc_key)
-            if acc is not None:
-                acc.expand(restore_fn, outputs=restore_outputs)
-
-        # Save preferences
-        components['conv_model_type'].change(
-            lambda x: save_preference("conv_model_type", x),
-            inputs=[components['conv_model_type']],
-            outputs=[]
-        )
-
-        components['conv_model_size'].change(
-            lambda x: save_preference("conv_model_size", x),
-            inputs=[components['conv_model_size']],
-            outputs=[]
-        )
-
-        components['conv_base_model_size'].change(
-            lambda x: save_preference("conv_base_model_size", x),
-            inputs=[components['conv_base_model_size']],
-            outputs=[]
-        )
-
-        components['longform_model_size'].change(
-            lambda x: save_preference("vibevoice_model_size", x),
-            inputs=[components['longform_model_size']],
-            outputs=[]
-        )
-
-        components['conv_language'].change(
-            lambda x: save_preference("language", x),
-            inputs=[components['conv_language']],
-            outputs=[]
-        )
-
-        # Save conversation pause preferences
-        components['conv_pause_linebreak'].change(
-            lambda x: save_preference("conv_pause_linebreak", x),
-            inputs=[components['conv_pause_linebreak']],
-            outputs=[]
-        )
-
-        components['conv_pause_period'].change(
-            lambda x: save_preference("conv_pause_period", x),
-            inputs=[components['conv_pause_period']],
-            outputs=[]
-        )
-
-        components['conv_pause_comma'].change(
-            lambda x: save_preference("conv_pause_comma", x),
-            inputs=[components['conv_pause_comma']],
-            outputs=[]
-        )
-
-        components['conv_pause_question'].change(
-            lambda x: save_preference("conv_pause_question", x),
-            inputs=[components['conv_pause_question']],
-            outputs=[]
-        )
-
-        components['conv_pause_hyphen'].change(
-            lambda x: save_preference("conv_pause_hyphen", x),
-            inputs=[components['conv_pause_hyphen']],
-            outputs=[]
-        )
-
-        # --- Cross-tab prompt routing ---
-        import modules.core_components.prompt_hub as _prompt_hub
-        _prompt_hub.wire_prompt_loader(components, "conv", {"conversation.script": components['conversation_script']})
-
-        prompt_apply_trigger = shared_state.get('prompt_apply_trigger')
-        if prompt_apply_trigger is not None:
-            import modules.core_components.prompt_hub as _prompt_hub
-
-            def _apply_conv_script(raw_value, current):
-                parsed = _prompt_hub.parse_apply_payload(raw_value)
-                if not parsed or parsed['target_id'] != 'conversation.script':
-                    return gr.update()
-                return gr.update(value=_prompt_hub.merge_text(current, parsed['text'], parsed['mode']))
-
-            prompt_apply_trigger.change(
-                _apply_conv_script,
-                inputs=[prompt_apply_trigger, components['conversation_script']],
-                outputs=[components['conversation_script']],
+        def list_trained_loras():
+            trained_models_folder = _user_config.get("trained_models_folder", "trained_models")
+            trained_root = OUTPUT_DIR.parent / trained_models_folder
+            lora_items = []
+            if not trained_root.exists():
+                return lora_items
+            for speaker_dir in sorted(
+                [d for d in trained_root.iterdir() if d.is_dir()],
+                key=lambda d: d.name.lower()
+            ):
+                adapter_path = speaker_dir / "adapter_model.safetensors"
+                if adapter_path.exists():
+                    lora_items.append((f"{speaker_dir.name} / adapter_model.safetensors", str(adapter_path)))
+                for lora_step in sorted(speaker_dir.glob("lora_step_*.safetensors"), key=lambda p: p.name, reverse=True):
+                    lora_items.append((f"{speaker_dir.name} / {lora_step.name}", str(lora_step)))
+                for best_step in sorted(speaker_dir.glob("best_step_*.safetensors"), key=lambda p: p.name, reverse=True):
+                    lora_items.append((f"{speaker_dir.name} / {best_step.name}", str(best_step)))
+            return lora_items
+
+        def refresh_all_lora_dropdowns(c1, c2, c3, c4):
+            lora_items = list_trained_loras()
+            lora_map = {label: path for label, path in lora_items}
+            choices = ["(None)"] + [label for label, _ in lora_items]
+            def _pick(cur):
+                return cur if cur in choices else "(None)"
+            return (
+                gr.update(choices=choices, value=_pick(c1)),
+                gr.update(choices=choices, value=_pick(c2)),
+                gr.update(choices=choices, value=_pick(c3)),
+                gr.update(choices=choices, value=_pick(c4)),
+                lora_map,
             )
 
-        # Set correct initial visibility on page load (tab.select doesn't fire for the first tab)
+        def refresh_voice_choices():
+            new_choices = ["(None)"] + get_sample_choices()
+            return (
+                gr.update(choices=new_choices),
+                gr.update(choices=new_choices),
+                gr.update(choices=new_choices),
+                gr.update(choices=new_choices),
+            )
+
+        def generate_dramabox_conversation_handler(
+            script, seed,
+            voice_1, voice_2, voice_3, voice_4,
+            lora_1, lora_2, lora_3, lora_4, lora_path_map,
+            pause_linebreak,
+            db_negative_prompt, db_ref_duration, db_gen_duration, db_steps,
+            db_sampler, db_speed, db_duration_multiplier,
+            db_cfg_scale, db_stg_scale, db_rescale_scale,
+            db_id_guidance_scale, db_no_watermark,
+            progress=gr.Progress()
+        ):
+            if not script or not script.strip():
+                return None, "Please enter a conversation script.", "", gr.update()
+
+            processed = preprocess_conversation_script(script)
+            lines = [l for l in processed.split("\n") if l.strip()]
+            if not lines:
+                return None, "Script has no speakable lines after processing.", "", gr.update()
+
+            voice_samples = prepare_voice_samples_dict(
+                get_available_samples, voice_1, voice_2, voice_3, voice_4
+            )
+
+            lora_selections = [lora_1, lora_2, lora_3, lora_4]
+            lora_paths = {}
+            for i, sel in enumerate(lora_selections, start=1):
+                if sel and sel != "(None)":
+                    path = (lora_path_map or {}).get(sel)
+                    if path:
+                        lora_paths[i] = path
+
+            try:
+                actual_seed = int(seed) if seed is not None else -1
+                if actual_seed < 0:
+                    actual_seed = random.randint(0, 2147483647)
+
+                def _opt_float(v):
+                    try: return float(v) if v is not None else None
+                    except Exception: return None
+
+                def _opt_int(v):
+                    try: return int(v) if v is not None else None
+                    except Exception: return None
+
+                def build_db_params():
+                    p = {
+                        "sampler": db_sampler if db_sampler in ("euler", "heun") else "euler",
+                        "ref_duration": _opt_float(db_ref_duration),
+                        "speed": _opt_float(db_speed),
+                        "duration_multiplier": _opt_float(db_duration_multiplier),
+                        "negative_prompt": (db_negative_prompt or "").strip(),
+                        "id_guidance_scale": _opt_float(db_id_guidance_scale),
+                        "no_watermark": bool(db_no_watermark),
+                        "gen_duration": None, "steps": None,
+                        "cfg_scale": None, "stg_scale": None, "rescale_scale": None,
+                    }
+                    gen_dur = _opt_float(db_gen_duration)
+                    if gen_dur is not None and gen_dur > 0:
+                        p["gen_duration"] = gen_dur
+                    steps_val = _opt_int(db_steps)
+                    if steps_val is not None and steps_val > 0:
+                        p["steps"] = steps_val
+                    cfg = _opt_float(db_cfg_scale)
+                    if cfg is not None and cfg > 0:
+                        p["cfg_scale"] = cfg
+                    stg = _opt_float(db_stg_scale)
+                    if stg is not None and stg > 0:
+                        p["stg_scale"] = stg
+                    rsc = _opt_float(db_rescale_scale)
+                    if rsc is not None and rsc >= 0:
+                        p["rescale_scale"] = rsc
+                    return p
+
+                pattern = re.compile(r"^\[(\d+)\]\s*:\s*(.+)$")
+                segment_paths = []
+                cpu_offload = _user_config.get("dramabox_cpu_offload", False)
+                db_params = build_db_params()
+
+                for idx, line in enumerate(lines):
+                    m = pattern.match(line.strip())
+                    if not m:
+                        continue
+                    speaker_idx = int(m.group(1))
+                    text_raw = m.group(2).strip()
+                    text_clean = extract_style_instructions(text_raw)
+                    if not text_clean:
+                        continue
+
+                    progress((idx + 1) / len(lines), desc=f"Generating line {idx + 1}/{len(lines)} (Speaker {speaker_idx})...")
+
+                    wav_path = voice_samples.get(speaker_idx)
+                    lora_path = lora_paths.get(speaker_idx)
+
+                    seg_name = f"conv_seg_{idx:04d}.wav"
+                    seg_path = TEMP_DIR / seg_name
+
+                    tts_manager.generate_dramabox_to_file(
+                        prompt=text_clean,
+                        output_path=str(seg_path),
+                        voice_sample=str(wav_path) if wav_path else None,
+                        seed=actual_seed + idx,
+                        lora_path=str(lora_path) if lora_path else None,
+                        cpu_offload=cpu_offload,
+                        dramabox_params=db_params,
+                    )
+                    segment_paths.append(seg_path)
+
+                if not segment_paths:
+                    return None, "❌ No segments generated. Check your script format.", "", gr.update()
+
+                progress(0.9, desc="Concatenating segments...")
+
+                metadata_lines = [
+                    f"Generated: {datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                    f"Engine: DramaBox",
+                    f"Seed: {actual_seed}",
+                    f"Segments: {len(segment_paths)}",
+                    "Speakers: " + ", ".join(
+                        "{}:{}".format(i, v or "(None)")
+                        for i, v in enumerate([voice_1, voice_2, voice_3, voice_4], 1)
+                    ),
+                    f"Script: {' '.join(script.split())[:200]}",
+                ]
+                metadata_out = "\n".join(metadata_lines)
+
+                pause_secs = float(pause_linebreak) if pause_linebreak else 0.3
+                final_path = finalize_conversation_output(
+                    segment_paths, pause_secs, TEMP_DIR, OUTPUT_DIR,
+                    _user_config, save_result_to_output, metadata_out
+                )
+
+                progress(1.0, desc="Done!")
+                if play_completion_beep:
+                    play_completion_beep()
+
+                manual_save = _user_config.get("manual_save", False)
+                status = f"Generated {len(segment_paths)} segments with DramaBox. Seed: {actual_seed}"
+                if manual_save:
+                    status += "\nClick 'Save to Output' to keep this result."
+                    return final_path, status, metadata_out, gr.update(interactive=True)
+
+                return final_path, status, "", gr.update()
+
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                return None, f"❌ Error generating conversation: {str(e)}", "", gr.update()
+
+        # Tab select — refresh samples and LoRAs
+        components['conversation_tab'].select(
+            refresh_voice_choices,
+            inputs=[],
+            outputs=[
+                components['conv_voice_1'],
+                components['conv_voice_2'],
+                components['conv_voice_3'],
+                components['conv_voice_4'],
+            ]
+        )
+
+        components['conversation_tab'].select(
+            refresh_all_lora_dropdowns,
+            inputs=[
+                components['conv_lora_dropdown_1'],
+                components['conv_lora_dropdown_2'],
+                components['conv_lora_dropdown_3'],
+                components['conv_lora_dropdown_4'],
+            ],
+            outputs=[
+                components['conv_lora_dropdown_1'],
+                components['conv_lora_dropdown_2'],
+                components['conv_lora_dropdown_3'],
+                components['conv_lora_dropdown_4'],
+                components['conv_lora_path_map'],
+            ]
+        )
+
+        components['conversation_tab'].select(
+            restore_fn,
+            inputs=[],
+            outputs=restore_outputs
+        )
+
+        components['generate_btn'].click(
+            generate_dramabox_conversation_handler,
+            inputs=[
+                components['conv_script'],
+                components['conv_seed'],
+                components['conv_voice_1'],
+                components['conv_voice_2'],
+                components['conv_voice_3'],
+                components['conv_voice_4'],
+                components['conv_lora_dropdown_1'],
+                components['conv_lora_dropdown_2'],
+                components['conv_lora_dropdown_3'],
+                components['conv_lora_dropdown_4'],
+                components['conv_lora_path_map'],
+                components['db_conv_pause_linebreak'],
+                components['db_conv_negative_prompt'],
+                components['db_conv_ref_duration'],
+                components['db_conv_gen_duration'],
+                components['db_conv_steps'],
+                components['db_conv_sampler'],
+                components['db_conv_speed'],
+                components['db_conv_duration_multiplier'],
+                components['db_conv_cfg_scale'],
+                components['db_conv_stg_scale'],
+                components['db_conv_rescale_scale'],
+                components['db_conv_id_guidance_scale'],
+                components['db_conv_no_watermark'],
+            ],
+            outputs=[
+                components['output_audio'],
+                components['conv_status'],
+                components['_result_metadata'],
+                components['save_result_btn'],
+            ]
+        )
+
+        if _user_config.get("manual_save", False):
+            def save_result_handler(audio_path, metadata_text):
+                if not audio_path:
+                    return None, "❌ No audio to save.", gr.update(interactive=False)
+                output_format = _user_config.get("output_format", "wav")
+                output_path = save_result_to_output(audio_path, OUTPUT_DIR, output_format, metadata_text)
+                return str(output_path), "Saved to output folder.", gr.update(interactive=False)
+
+            components['save_result_btn'].click(
+                save_result_handler,
+                inputs=[components['output_audio'], components['_result_metadata']],
+                outputs=[components['output_audio'], components['conv_status'], components['save_result_btn']]
+            )
+
         app = shared_state.get('app')
         if app:
             app.load(
-                toggle_conv_ui,
-                inputs=[components['conv_model_type']],
-                outputs=conv_section_outputs
+                refresh_all_lora_dropdowns,
+                inputs=[
+                    components['conv_lora_dropdown_1'],
+                    components['conv_lora_dropdown_2'],
+                    components['conv_lora_dropdown_3'],
+                    components['conv_lora_dropdown_4'],
+                ],
+                outputs=[
+                    components['conv_lora_dropdown_1'],
+                    components['conv_lora_dropdown_2'],
+                    components['conv_lora_dropdown_3'],
+                    components['conv_lora_dropdown_4'],
+                    components['conv_lora_path_map'],
+                ]
             )
 
 
-# Export for tab registry
 get_tool_class = lambda: ConversationTool
-
-
-if __name__ == "__main__":
-    """Standalone testing of Conversation tool."""
-    from modules.core_components.tools import run_tool_standalone
-    run_tool_standalone(ConversationTool, port=7864, title="Conversation - Standalone")

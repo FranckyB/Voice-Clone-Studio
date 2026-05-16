@@ -667,6 +667,7 @@ class PrepSamplesTool(Tool):
 
             msg = " | ".join(results) if results else "Nothing to save"
             updated_files = get_dataset_files(folder)
+            generate_dramabox_manifest(base_dir)
             return msg, gr.update(), updated_files, gr.update()
 
         def handle_input_modal(input_value, audio, transcription, folder, language, transcribe_model,
@@ -782,6 +783,35 @@ class PrepSamplesTool(Tool):
             return no_update
 
         # ===== Batch transcribe (dataset mode only) =====
+
+        def generate_dramabox_manifest(base_dir):
+            """Generate train_dramabox.jsonl from all WAV+TXT pairs in the dataset folder.
+
+            Format: {"audio_filepath": "<abs_path>", "text": "<transcript>"}
+            This is the manifest format DramaBox's preprocess.py expects.
+            Returns the number of entries written.
+            """
+            import json as _json
+            entries = []
+            for wav in sorted(base_dir.glob("*.wav")):
+                txt = wav.with_suffix(".txt")
+                if txt.exists():
+                    text = txt.read_text(encoding="utf-8").strip()
+                    if text:
+                        try:
+                            info = sf.info(str(wav))
+                            duration = info.frames / info.samplerate
+                        except Exception:
+                            duration = 0.0
+                        entries.append({"audio_filepath": str(wav), "text": text, "duration": round(duration, 3)})
+            if not entries:
+                return 0
+            manifest_path = base_dir / "train_dramabox.jsonl"
+            with open(manifest_path, "w", encoding="utf-8") as f:
+                for e in entries:
+                    _json.dump(e, f, ensure_ascii=False)
+                    f.write("\n")
+            return len(entries)
 
         def batch_transcribe_handler(folder, replace_existing, language, transcribe_model, progress=gr.Progress()):
             """Batch transcribe all audio files in a dataset folder."""
@@ -902,6 +932,11 @@ class PrepSamplesTool(Tool):
                 progress(1.0, desc="Batch transcription complete!")
                 if play_completion_beep:
                     play_completion_beep()
+
+                count = generate_dramabox_manifest(base_dir)
+                if count > 0:
+                    status_log.append("")
+                    status_log.append(f"Generated train_dramabox.jsonl ({count} entries)")
 
                 return "\n".join(status_log)
 
@@ -1340,19 +1375,35 @@ class PrepSamplesTool(Tool):
                 base_dir = DATASETS_DIR / folder
                 base_dir.mkdir(parents=True, exist_ok=True)
 
-                # Find the next available clip number (avoid overwriting existing clips)
-                existing_numbers = []
-                for f in base_dir.glob(f"{clip_prefix}_*.wav"):
-                    # Extract the number suffix (e.g., "name_003.wav" -> 3)
-                    stem = f.stem
-                    suffix = stem[len(clip_prefix) + 1:]
-                    if suffix.isdigit():
-                        existing_numbers.append(int(suffix))
-                start_number = max(existing_numbers) + 1 if existing_numbers else 1
+                # Collect existing stems to avoid name collisions
+                existing_stems = {f.stem for f in base_dir.glob("*.wav")}
+
+                def _make_clip_name(prefix, text):
+                    """Build a clip name from the first few words of the transcript.
+
+                    Rules: strip punctuation, take words until 5 words or 25 chars
+                    is reached, join with underscores, prepend prefix if given.
+                    """
+                    words = re.sub(r"[^\w\s]", "", text).split()
+                    name_part = ""
+                    for w in words:
+                        candidate = f"{name_part}_{w}" if name_part else w
+                        if len(candidate) > 25 or len(candidate.split("_")) > 5:
+                            break
+                        name_part = candidate
+                    if not name_part:
+                        name_part = "clip"
+                    return f"{prefix}_{name_part}" if prefix else name_part
 
                 saved_count = 0
                 for i, (start_time, end_time, text) in enumerate(segments):
-                    clip_name = f"{clip_prefix}_{start_number + i:03d}"
+                    base_name = _make_clip_name(clip_prefix, text)
+                    clip_name = base_name
+                    n = 2
+                    while clip_name in existing_stems:
+                        clip_name = f"{base_name}_{n}"
+                        n += 1
+                    existing_stems.add(clip_name)
 
                     start_sample = int(start_time * sr)
                     end_sample = int(end_time * sr)

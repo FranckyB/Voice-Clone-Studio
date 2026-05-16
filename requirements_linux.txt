@@ -1,10 +1,9 @@
-# Voice Clone Studio - Universal Requirements
+# Voice Clone Studio - Runtime Requirements
+# DramaBox-only build: core app + MMAudio + ASR + shared utilities.
+# Legacy engines removed: Qwen3-TTS, LuxTTS, Chatterbox, Fish Speech.
 
-# Supports Windows, Linux, and macOS with platform-specific packages
-
-# Core TTS and audio processing dependencies (all platforms)
+# Core audio/model runtime dependencies (all platforms)
 numpy==1.26.4
-qwen-tts
 librosa
 torchaudio
 soundfile
@@ -22,6 +21,9 @@ diffusers
 markdown
 tensorboard
 
+# ASR dependencies
+qwen-asr
+
 # MMAudio Sound Effects dependencies (torchvision installed with PyTorch in setup script)
 open_clip_torch
 torchdiffeq
@@ -30,53 +32,15 @@ colorlog
 omegaconf
 av>=14.0.1
 
-# Fish Speech S2 dependencies (vendored in modules/fish_speech/)
-# descript-audio-codec and descript-audiotools are installed with --no-deps
-# in setup scripts to avoid audiotools' overly restrictive protobuf<3.20 pin.
-hydra-core>=1.3.2
-loguru
-protobuf>=5.29.0
-argbind>=0.3.7
-pyloudnorm
-julius
-ffmpy
-#Missing Fish Speech dependence on new / clean install
-flatten-dict
-importlib-resources
-tabulate
-randomname
-markdown2
-matplotlib
-torch-stoi
-pystoi
-ipython
-#for compilation speed-up
 ninja
 
-# LuxTTS voice cloning (optional - install via setup script or manually)
-# Prerequisites (install in order before zipvoice):
-#   pip install git+https://github.com/ysharma3501/LinaCodec.git
-#   pip install piper-phonemize --find-links https://k2-fsa.github.io/icefall/piper_phonemize.html
-#   pip install "zipvoice @ git+https://github.com/ysharma3501/LuxTTS.git"
-
-# 4-bit quantization support (all platforms)
+# 4-bit quantization support (used by DramaBox/Gemma paths)
 bitsandbytes
 
-# Voice isolation and denoising (optional - requires Rust compiler to build from source)
-# DeepFilterNet is installed separately by setup scripts with graceful fallback
-# pip install deepfilternet
-
-# Chatterbox Voice Conversion & TTS (vendored in modules/chatterbox/)
-s3tokenizer
-conformer
-
-# VibeVoice LoRA training
-peft
-
-# Optional performance enhancements (install separately for best performance):
-# - Flash Attention 2 (fast): pip install flash-attn --no-build-isolation
-
-# Note for Linux users:
-# - If onnxruntime fails to install, try the nightly build:
-# - openai-whisper is excluded due to compatibility issues (llvmlite/numba build failures)
-# - VibeVoice ASR can be used for transcription instead
+# DramaBox finetune/runtime shared deps
+accelerate>=1.11.0
+safetensors>=0.7.0
+sentencepiece>=0.2.0
+PyYAML>=6.0
+pydantic==2.10.6
+peft>0.19.0

@@ -3,6 +3,7 @@ services:
     build:
       context: .
       target: runtime
+    gpus: all
     ports:
       - "7860:7860"
     environment:
@@ -17,10 +18,3 @@ services:
       - "./samples:/home/user/app/samples"
       - "./output:/home/user/app/output"
       - "${HF_CACHE_HOST_PATH:-./.hf_cache}:${HF_CACHE_CONTAINER_PATH:-/home/user/app/.cache/huggingface}"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]

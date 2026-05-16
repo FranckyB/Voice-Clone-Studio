@@ -112,7 +112,6 @@ BRAND_MAP = {
     "Qwen3": "qwen3",
     "VibeVoice": "vibevoice",
     "LuxTTS": "luxtts",
-    "chatterbox": "chatterbox",
 }
 
 
@@ -491,409 +490,14 @@ def train_model(folder, speaker_name, ref_audio_filename, batch_size,
                 learning_rate, num_epochs, save_interval,
                 user_config, datasets_dir, project_root,
                 play_completion_beep=None, progress=None):
-    """Complete training workflow: validate, prepare data, and train model.
+    """Legacy Qwen finetuning wrapper.
 
-    Args:
-        folder: Dataset subfolder name
-        speaker_name: Name for the trained model/speaker
-        ref_audio_filename: Reference audio file from dataset
-        batch_size: Training batch size
-        learning_rate: Training learning rate
-        num_epochs: Number of training epochs
-        save_interval: Save checkpoint every N epochs
-        user_config: User configuration dict
-        datasets_dir: Path to datasets directory
-        project_root: Path to project root
-        play_completion_beep: Optional callback for audio notification
-        progress: Optional Gradio progress callback
+    Qwen finetuning is disabled in this DramaBox build.
     """
-    import subprocess
-    import sys
-    import json
-    import os
-    from modules.core_components.audio_utils import check_audio_format
-
-    if progress is None:
-        def progress(*a, **kw):
-            pass
-
-    # ============== STEP 1: Validation ==============
-    progress(0.0, desc="Validating dataset...")
-
-    if not folder or folder == "(No folders)" or folder == "(Select Dataset)":
-        return "Error: Please select a dataset folder"
-
-    if not speaker_name or not speaker_name.strip():
-        return "Error: Please enter a speaker name"
-
-    if not ref_audio_filename:
-        return "Error: Please select a reference audio file"
-
-    if save_interval is None:
-        save_interval = 5
-
-    # Create output directory
-    trained_models_folder = user_config.get("trained_models_folder", "trained_models")
-    output_dir = project_root / trained_models_folder / speaker_name.strip()
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    base_dir = datasets_dir / folder
-    if not base_dir.exists():
-        return f"Error: Folder not found: {folder}"
-
-    ref_audio_path = base_dir / ref_audio_filename
-    if not ref_audio_path.exists():
-        return f"Error: Reference audio not found: {ref_audio_filename}"
-
-    # Only get audio files
-    audio_files = [f for f in (list(base_dir.glob("*.wav")) + list(base_dir.glob("*.mp3")))
-                   if not f.name.endswith('.txt') and not f.name.endswith('.jsonl')]
-    if not audio_files:
-        return "Error: No audio files found in folder"
-
-    issues = []
-    valid_files = []
-    converted_count = 0
-    total = len(audio_files)
-
-    status_log = []
-    status_log.append("=" * 60)
-    status_log.append("STEP 1/3: DATASET VALIDATION")
-    status_log.append("=" * 60)
-
-    for i, audio_path in enumerate(audio_files):
-        progress(0.0, desc=f"Validating {audio_path.name}...")
-
-        txt_path = audio_path.with_suffix(".txt")
-
-        if not txt_path.exists():
-            issues.append(f"[X] {audio_path.name}: Missing transcript")
-            continue
-
-        try:
-            transcript = txt_path.read_text(encoding="utf-8").strip()
-            if not transcript:
-                issues.append(f"[X] {audio_path.name}: Empty transcript")
-                continue
-        except Exception:
-            issues.append(f"[X] {audio_path.name}: Cannot read transcript")
-            continue
-
-        is_correct, info = check_audio_format(str(audio_path))
-        if not is_correct:
-            if not info:
-                issues.append(f"[X] {audio_path.name}: Cannot read audio file")
-                continue
-
-            progress(0.0, desc=f"Converting {audio_path.name}...")
-            temp_output = audio_path.parent / f"temp_{audio_path.name}"
-            cmd = [
-                'ffmpeg', '-y', '-i', str(audio_path),
-                '-ar', '24000', '-ac', '1', '-sample_fmt', 's16',
-                '-acodec', 'pcm_s16le', str(temp_output)
-            ]
-
-            try:
-                result = subprocess.run(cmd, capture_output=True, text=True)
-                if result.returncode == 0 and temp_output.exists():
-                    audio_path.unlink()
-                    temp_output.rename(audio_path)
-                    converted_count += 1
-                else:
-                    issues.append(f"[X] {audio_path.name}: Conversion failed - {result.stderr[:100]}")
-                    continue
-            except FileNotFoundError:
-                issues.append(f"[X] {audio_path.name}: ffmpeg not found")
-                continue
-            except Exception as e:
-                issues.append(f"[X] {audio_path.name}: Conversion error - {str(e)[:100]}")
-                continue
-
-        valid_files.append(audio_path.name)
-
-    if not valid_files:
-        return "Error: No valid training samples found\n" + "\n".join(issues[:10])
-
-    status_log.append(f"Found {len(valid_files)} valid training samples")
-    if converted_count > 0:
-        status_log.append(f"Auto-converted {converted_count} files to 24kHz 16-bit mono")
-    if issues:
-        status_log.append(f"{len(issues)} files skipped:")
-        for issue in issues[:5]:
-            status_log.append(f"   {issue}")
-        if len(issues) > 5:
-            status_log.append(f"   ... and {len(issues) - 5} more")
-
-    # Ensure reference audio is correct format
-    progress(0.0, desc="Preparing reference audio...")
-    is_correct, info = check_audio_format(str(ref_audio_path))
-    if not is_correct:
-        temp_output = ref_audio_path.parent / f"temp_{ref_audio_path.name}"
-        cmd = [
-            'ffmpeg', '-y', '-i', str(ref_audio_path),
-            '-ar', '24000', '-ac', '1', '-sample_fmt', 's16',
-            '-acodec', 'pcm_s16le', str(temp_output)
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode == 0 and temp_output.exists():
-            ref_audio_path.unlink()
-            temp_output.rename(ref_audio_path)
-        else:
-            return f"Error: Failed to convert reference audio: {result.stderr[:200]}"
-
-    # Generate train_raw.jsonl
-    progress(0.0, desc="Preparing training data...")
-    train_raw_path = base_dir / "train_raw.jsonl"
-    jsonl_entries = []
-
-    for filename in valid_files:
-        audio_path_entry = base_dir / filename
-        txt_path = audio_path_entry.with_suffix(".txt")
-        transcript = txt_path.read_text(encoding="utf-8").strip()
-
-        entry = {
-            "audio": str(audio_path_entry.absolute()),
-            "text": transcript,
-            "ref_audio": str(ref_audio_path.absolute())
-        }
-        jsonl_entries.append(entry)
-
-    try:
-        with open(train_raw_path, 'w', encoding='utf-8') as f:
-            for entry in jsonl_entries:
-                f.write(json.dumps(entry, ensure_ascii=False) + '\n')
-        status_log.append(f"Generated train_raw.jsonl with {len(jsonl_entries)} entries")
-    except Exception as e:
-        return f"Error: Failed to write train_raw.jsonl: {str(e)}"
-
-    # ============== STEP 2: Prepare Data (extract audio codes) ==============
-    status_log.append("")
-    status_log.append("=" * 60)
-    status_log.append("STEP 2/3: EXTRACTING AUDIO CODES")
-    status_log.append("=" * 60)
-    progress(0.0, desc="Extracting audio codes...")
-
-    train_with_codes_path = base_dir / "train_with_codes.jsonl"
-    modules_dir = project_root / "modules"
-    prepare_script = modules_dir / "qwen_finetune" / "prepare_data.py"
-
-    if not prepare_script.exists():
-        status_log.append("[X] Qwen3-TTS finetuning scripts not found!")
-        status_log.append("   Please ensure Qwen3-TTS repository is cloned.")
-        return "\n".join(status_log)
-
-    prepare_cmd = [
-        sys.executable,
-        "-u",
-        str(prepare_script.absolute()),
-        "--device", get_device(),
-        "--tokenizer_model_path", "Qwen/Qwen3-TTS-Tokenizer-12Hz",
-        "--input_jsonl", str(train_raw_path),
-        "--output_jsonl", str(train_with_codes_path)
-    ]
-
-    status_log.append(f"Running: {' '.join(prepare_cmd)}")
-    status_log.append("")
-
-    try:
-        global _active_training_process, _training_stop_requested
-        _training_stop_requested = False
-
-        result = subprocess.Popen(
-            prepare_cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-            universal_newlines=True,
-            cwd=str(base_dir)
-        )
-        _active_training_process = result
-
-        for line in result.stdout:
-            if _training_stop_requested:
-                break
-            line = line.strip()
-            if line:
-                status_log.append(f"  {line}")
-
-        if _training_stop_requested:
-            try:
-                result.kill()
-                result.wait(timeout=5)
-            except Exception:
-                pass
-            _active_training_process = None
-            status_log.append("")
-            status_log.append("Training stopped by user.")
-            return "\n".join(status_log)
-
-        result.wait()
-
-        if result.returncode != 0:
-            status_log.append(f"[X] prepare_data.py failed with exit code {result.returncode}")
-            return "\n".join(status_log)
-
-        if not train_with_codes_path.exists():
-            status_log.append("[X] train_with_codes.jsonl was not generated")
-            return "\n".join(status_log)
-
-        status_log.append("")
-        status_log.append("[OK] Audio codes extracted successfully")
-
-    except Exception as e:
-        status_log.append(f"[X] Error running prepare_data.py: {str(e)}")
-        return "\n".join(status_log)
-
-    # ============== STEP 3: Fine-tune ==============
-    status_log.append("")
-    status_log.append("=" * 60)
-    status_log.append("STEP 3/3: TRAINING MODEL")
-    status_log.append("=" * 60)
-    progress(0.0, desc="Starting training...")
-
-    sft_script = modules_dir / "qwen_finetune" / "sft_12hz.py"
-
-    if not sft_script.exists():
-        status_log.append("[X] sft_12hz.py not found!")
-        return "\n".join(status_log)
-
-    base_model_id = "Qwen/Qwen3-TTS-12Hz-1.7B-Base"
-
-    status_log.append(f"Locating base model: {base_model_id}")
-    try:
-        from huggingface_hub import snapshot_download
-        offline_mode = user_config.get("offline_mode", False)
-        base_model_path = snapshot_download(
-            repo_id=base_model_id,
-            allow_patterns=["*.json", "*.safetensors", "*.txt", "*.npz"],
-            local_files_only=offline_mode
-        )
-        status_log.append(f"[OK] Using cached model at: {base_model_path}")
-    except Exception as e:
-        status_log.append(f"[X] Failed to locate/download base model: {str(e)}")
-        return "\n".join(status_log)
-
-    attn_impl = user_config.get("attention_mechanism", "auto")
-
-    sft_cmd = [
-        sys.executable,
-        "-u",
-        str(sft_script.absolute()),
-        "--init_model_path", base_model_path,
-        "--output_model_path", str(output_dir),
-        "--train_jsonl", str(train_with_codes_path),
-        "--batch_size", str(int(batch_size)),
-        "--lr", str(learning_rate),
-        "--num_epochs", str(int(num_epochs)),
-        "--save_interval", str(int(save_interval)),
-        "--speaker_name", speaker_name.strip().lower(),
-        "--attn_implementation", attn_impl
-    ]
-
-    status_log.append("")
-    status_log.append("Training configuration:")
-    status_log.append(f"  Base model: {base_model_id}")
-    status_log.append(f"  Attention implementation: {attn_impl}")
-    status_log.append(f"  Batch size: {int(batch_size)}")
-    status_log.append(f"  Learning rate: {learning_rate}")
-    status_log.append(f"  Epochs: {int(num_epochs)}")
-    status_log.append(f"  Save interval: Every {int(save_interval)} epoch(s)" if save_interval > 0 else "  Save interval: Every epoch")
-    status_log.append(f"  Speaker name: {speaker_name.strip()}")
-    status_log.append(f"  Output: {output_dir}")
-    status_log.append("")
-    status_log.append("Starting training...")
-    status_log.append(f"Running: {' '.join([str(arg) for arg in sft_cmd])}")
-    status_log.append("")
-
-    try:
-        env = os.environ.copy()
-        env['TRANSFORMERS_NO_ADVISORY_WARNINGS'] = '1'
-        env['TOKENIZERS_PARALLELISM'] = 'false'
-
-        result = subprocess.Popen(
-            sft_cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-            universal_newlines=True,
-            env=env
-        )
-        _active_training_process = result
-
-        # Track steps per epoch to compute accurate progress
-        max_step_seen = 0
-        total_epochs = int(num_epochs)
-
-        for line in result.stdout:
-            if _training_stop_requested:
-                break
-            line = line.strip()
-            if line:
-                status_log.append(f"  {line}")
-
-                if "Epoch" in line and "Step" in line:
-                    try:
-                        epoch_num = int(line.split("Epoch")[1].split("|")[0].strip())
-                        step_num = int(line.split("Step")[1].split("|")[0].strip())
-                        if step_num > max_step_seen:
-                            max_step_seen = step_num
-                        # Calculate progress: 0.0 to 1.0 based on epoch/step
-                        if max_step_seen > 0:
-                            epoch_progress = (epoch_num * (max_step_seen + 1) + step_num) / (total_epochs * (max_step_seen + 1))
-                        else:
-                            epoch_progress = epoch_num / total_epochs
-                        progress_val = epoch_progress
-                        # Extract loss for the description
-                        loss_str = ""
-                        if "Loss:" in line:
-                            loss_str = " | Loss: " + line.split("Loss:")[1].strip()
-                        progress(progress_val, desc=f"Training: Epoch {epoch_num + 1}/{total_epochs} | Step {step_num}{loss_str}")
-                    except Exception:
-                        pass
-
-        if _training_stop_requested:
-            try:
-                result.kill()
-                result.wait(timeout=5)
-            except Exception:
-                pass
-            _active_training_process = None
-            status_log.append("")
-            status_log.append("Training stopped by user.")
-            return "\n".join(status_log)
-
-        result.wait()
-        _active_training_process = None
-
-        if result.returncode != 0:
-            status_log.append("")
-            status_log.append(f"[X] Training failed with exit code {result.returncode}")
-            return "\n".join(status_log)
-
-        status_log.append("")
-        status_log.append("=" * 60)
-        status_log.append("TRAINING COMPLETED SUCCESSFULLY!")
-        status_log.append("=" * 60)
-        status_log.append(f"Model saved to: {output_dir}")
-        status_log.append(f"Speaker name: {speaker_name.strip()}")
-        status_log.append("")
-        status_log.append("To use your trained model:")
-        status_log.append("  1. Go to Voice Presets tab")
-        status_log.append("  2. Select 'Trained Models' radio button")
-        status_log.append(f"  3. Click refresh and select '{speaker_name.strip()}'")
-
-        progress(1.0, desc="Training complete!")
-        if play_completion_beep:
-            play_completion_beep()
-
-    except Exception as e:
-        status_log.append(f"[X] Error during training: {str(e)}")
-        return "\n".join(status_log)
-
-    return "\n".join(status_log)
-
+    return (
+        "Error: Qwen3 finetuning is disabled in this build.\n"
+        "Use Model Type = DramaBox in Train Model."
+    )
 
 def train_vibevoice_model(folder, speaker_name, batch_size, learning_rate,
                           num_epochs, save_interval, ddpm_batch_mul,
@@ -903,454 +507,351 @@ def train_vibevoice_model(folder, speaker_name, batch_size, learning_rate,
                           ema_decay, base_model_size,
                           user_config, datasets_dir, project_root,
                           play_completion_beep=None, progress=None):
-    """Complete VibeVoice LoRA training workflow.
+    """Legacy VibeVoice training wrapper.
 
-    Uses the vendored training script via subprocess, same pattern as Qwen3 training.
-
-    Args:
-        folder: Dataset subfolder name
-        speaker_name: Name for the trained model/speaker
-        batch_size: Training batch size
-        learning_rate: Training learning rate
-        num_epochs: Number of training epochs
-        ddpm_batch_mul: Diffusion batch multiplier
-        diffusion_loss_weight: Weight for diffusion loss
-        ce_loss_weight: Weight for cross-entropy loss
-        voice_prompt_drop_rate: Probability to drop voice prompts during training
-        train_diffusion_head: Whether to train the diffusion head
-        gradient_accumulation_steps: Gradient accumulation steps
-        warmup_steps: Warmup steps for learning rate scheduler
-        user_config: User configuration dict
-        datasets_dir: Path to datasets directory
-        project_root: Path to project root
-        play_completion_beep: Optional callback for audio notification
-        progress: Optional Gradio progress callback
+    VibeVoice finetuning is disabled in this DramaBox build.
     """
+    return (
+        "Error: VibeVoice finetuning is disabled in this build.\n"
+        "Use Model Type = DramaBox in Train Model."
+    )
+
+
+def train_dramabox_model(folder, speaker_name, batch_size, learning_rate,
+                         num_epochs, save_interval,
+                         gradient_accumulation_steps, warmup_steps,
+                         lora_rank, lora_alpha, lora_dropout,
+                         lr_scheduler, base_model, ref_ratio,
+                         text_dropout, seed, resume_lora,
+                         user_config, datasets_dir, project_root,
+                         play_completion_beep=None, progress=None):
+    """Run DramaBox finetuning via its training script."""
+    global _active_training_process, _training_stop_requested
+    import os
     import subprocess
     import sys
-    import json
-    import os
-    from modules.core_components.audio_utils import check_audio_format
+
+    _training_stop_requested = False
 
     if progress is None:
         def progress(*a, **kw):
             pass
 
-    # ============== STEP 1: Validation ==============
-    progress(0.0, desc="Validating dataset...")
-
-    if not folder or folder == "(No folders)" or folder == "(Select Dataset)":
+    if not folder or folder in ("(No folders)", "(Select Dataset)"):
         return "Error: Please select a dataset folder"
 
     if not speaker_name or not speaker_name.strip():
-        return "Error: Please enter a speaker name"
+        return "Error: Please enter a model name"
 
-    # Create output directory
+    dataset_dir = datasets_dir / folder
+    if not dataset_dir.exists():
+        return f"Error: Dataset folder not found: {folder}"
+
+    configured_dramabox = user_config.get("dramabox_folder", "").strip()
+    if configured_dramabox:
+        dramabox_root = Path(configured_dramabox)
+    else:
+        dramabox_root = project_root / "modules" / "dramabox"
+        if not dramabox_root.exists():
+            dramabox_root = project_root.parent / "DramaBox"
+        if not dramabox_root.exists():
+            dramabox_root = project_root / "DramaBox"
+
+    train_script = dramabox_root / "src" / "train.py"
+    if not train_script.exists():
+        return (
+            "Error: DramaBox training script not found.\n"
+            f"Expected: {train_script}\n"
+            "Set 'dramabox_folder' in config.json if DramaBox is elsewhere."
+        )
+
+    import json as _json
+    import importlib.util as _ilu
+
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.pathsep.join([
+        str(dramabox_root),
+        str(dramabox_root / "src"),
+        str(dramabox_root / "ltx2"),
+        env.get("PYTHONPATH", ""),
+    ]).strip(os.pathsep)
+
+    # ------------------------------------------------------------------
+    # Step 1 — Always regenerate train_dramabox.jsonl to keep durations accurate
+    # ------------------------------------------------------------------
+    dramabox_manifest = dataset_dir / "train_dramabox.jsonl"
+    if True:
+        progress(0.02, desc="Generating train_dramabox.jsonl...")
+        import soundfile as _sf
+        entries = []
+        for wav in sorted(dataset_dir.glob("*.wav")):
+            txt = wav.with_suffix(".txt")
+            if txt.exists():
+                text = txt.read_text(encoding="utf-8").strip()
+                if text:
+                    try:
+                        _info = _sf.info(str(wav))
+                        _dur = _info.frames / _info.samplerate
+                    except Exception:
+                        _dur = 0.0
+                    entries.append({"audio_filepath": str(wav), "text": text, "duration": round(_dur, 3)})
+        if not entries:
+            return (
+                "Error: No audio+transcript pairs found in dataset folder.\n"
+                "Use Prep Samples > Datasets to add audio clips and transcribe them first."
+            )
+        with open(dramabox_manifest, "w", encoding="utf-8") as f:
+            for e in entries:
+                _json.dump(e, f, ensure_ascii=False)
+                f.write("\n")
+
+    # ------------------------------------------------------------------
+    # Step 2 — Run preprocess.py if audio_latents not yet encoded
+    # ------------------------------------------------------------------
+    audio_latents_dir = dataset_dir / "audio_latents"
+    has_latents = audio_latents_dir.exists() and any(audio_latents_dir.glob("*.pt"))
+
+    progress(0.05, desc="Resolving DramaBox model paths...")
+    dl_path = dramabox_root / "src" / "model_downloader.py"
+    _spec = _ilu.spec_from_file_location("_dramabox_dl_train", str(dl_path))
+    _dl_mod = _ilu.module_from_spec(_spec)
+    _spec.loader.exec_module(_dl_mod)
+    model_paths = _dl_mod.get_all_paths()
+
+    if not has_latents:
+        preprocess_script = dramabox_root / "src" / "preprocess.py"
+        if not preprocess_script.exists():
+            return (
+                "Error: DramaBox preprocess.py not found.\n"
+                f"Expected: {preprocess_script}"
+            )
+
+        preprocess_cmd = [
+            sys.executable, "-u", str(preprocess_script),
+            "--dataset-type", "manifest",
+            "--index", str(dramabox_manifest),
+            "--audio-dir", str(dataset_dir),
+            "--output-dir", str(dataset_dir),
+            "--checkpoint", str(model_paths["transformer"]),
+            "--audio-only-ckpt", str(model_paths["audio_components"]),
+            "--gemma-root", str(model_paths["gemma_root"]),
+            "--skip-existing",
+            "--min-duration", "1.0",
+        ]
+
+        progress(0.10, desc="Preprocessing dataset (encoding audio + text)...")
+        preprocess_result = subprocess.run(
+            preprocess_cmd,
+            cwd=str(dramabox_root),
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+
+        if preprocess_result.returncode != 0:
+            err = (preprocess_result.stderr or preprocess_result.stdout or "").strip()
+            return (
+                f"Error: Preprocessing failed (exit {preprocess_result.returncode})\n"
+                f"{err[:3000]}"
+            )
+
+        if not any(audio_latents_dir.glob("*.pt")):
+            preprocess_log = (preprocess_result.stderr or preprocess_result.stdout or "").strip()
+            return (
+                "Error: Preprocessing completed but no audio_latents were created.\n"
+                "Check that your audio files are valid WAV format (minimum 1 second each).\n\n"
+                f"Preprocessor output:\n{preprocess_log[:3000]}"
+            )
+
+    # ------------------------------------------------------------------
+    # Step 3 — Auto-generate speaker_index.txt from audio_latents
+    # ------------------------------------------------------------------
+    # Always regenerate speaker_index.txt from the actual .pt files to avoid
+    # stale entries (e.g. old integer IDs after a stem-based re-preprocessing).
+    speaker_index = dataset_dir / "speaker_index.txt"
+    pt_files = sorted(audio_latents_dir.glob("*.pt"))
+    lines = []
+    for pt in pt_files:
+        lines.append(f"{pt.stem}~{folder}~en~0~0~_~\n")
+    if not lines:
+        return "Error: Failed to generate speaker_index.txt — no valid audio_latents found."
+    speaker_index.write_text("".join(lines), encoding="utf-8")
+
     trained_models_folder = user_config.get("trained_models_folder", "trained_models")
     output_dir = project_root / trained_models_folder / speaker_name.strip()
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    base_dir = datasets_dir / folder
-    if not base_dir.exists():
-        return f"Error: Folder not found: {folder}"
+    steps = max(100, int(num_epochs or 100))
 
-    # Collect audio files
-    audio_files = [f for f in (list(base_dir.glob("*.wav")) + list(base_dir.glob("*.mp3")))
-                   if not f.name.endswith('.txt') and not f.name.endswith('.jsonl')]
-    if not audio_files:
-        return "Error: No audio files found in folder"
-
-    issues = []
-    valid_files = []
-    converted_count = 0
-
-    status_log = []
-    status_log.append("=" * 60)
-    status_log.append("STEP 1/2: DATASET VALIDATION")
-    status_log.append("=" * 60)
-
-    for audio_path in audio_files:
-        progress(0.0, desc=f"Validating {audio_path.name}...")
-
-        txt_path = audio_path.with_suffix(".txt")
-        if not txt_path.exists():
-            issues.append(f"[X] {audio_path.name}: Missing transcript")
-            continue
-
-        try:
-            transcript = txt_path.read_text(encoding="utf-8").strip()
-            if not transcript:
-                issues.append(f"[X] {audio_path.name}: Empty transcript")
-                continue
-        except Exception:
-            issues.append(f"[X] {audio_path.name}: Cannot read transcript")
-            continue
-
-        is_correct, info = check_audio_format(str(audio_path))
-        if not is_correct:
-            if not info:
-                issues.append(f"[X] {audio_path.name}: Cannot read audio file")
-                continue
-
-            progress(0.0, desc=f"Converting {audio_path.name}...")
-            temp_output = audio_path.parent / f"temp_{audio_path.name}"
-            cmd = [
-                'ffmpeg', '-y', '-i', str(audio_path),
-                '-ar', '24000', '-ac', '1', '-sample_fmt', 's16',
-                '-acodec', 'pcm_s16le', str(temp_output)
-            ]
-
-            try:
-                result = subprocess.run(cmd, capture_output=True, text=True)
-                if result.returncode == 0 and temp_output.exists():
-                    audio_path.unlink()
-                    temp_output.rename(audio_path)
-                    converted_count += 1
-                else:
-                    issues.append(f"[X] {audio_path.name}: Conversion failed - {result.stderr[:100]}")
-                    continue
-            except FileNotFoundError:
-                issues.append(f"[X] {audio_path.name}: ffmpeg not found")
-                continue
-            except Exception as e:
-                issues.append(f"[X] {audio_path.name}: Conversion error - {str(e)[:100]}")
-                continue
-
-        valid_files.append(audio_path.name)
-
-    if not valid_files:
-        return "Error: No valid training samples found\n" + "\n".join(issues[:10])
-
-    status_log.append(f"Found {len(valid_files)} valid training samples")
-    if converted_count > 0:
-        status_log.append(f"Auto-converted {converted_count} files to 24kHz 16-bit mono")
-    if issues:
-        status_log.append(f"{len(issues)} files skipped:")
-        for issue in issues[:5]:
-            status_log.append(f"   {issue}")
-        if len(issues) > 5:
-            status_log.append(f"   ... and {len(issues) - 5} more")
-
-    # Generate train.jsonl for VibeVoice
-    progress(0.0, desc="Preparing training data...")
-    train_jsonl_path = base_dir / "train_vibevoice.jsonl"
-    jsonl_entries = []
-
-    for filename in valid_files:
-        audio_path_entry = base_dir / filename
-        txt_path = audio_path_entry.with_suffix(".txt")
-        transcript = txt_path.read_text(encoding="utf-8").strip()
-
-        entry = {
-            "audio": str(audio_path_entry.absolute()),
-            "text": transcript,
-        }
-        jsonl_entries.append(entry)
-
-    try:
-        with open(train_jsonl_path, 'w', encoding='utf-8') as f:
-            for entry in jsonl_entries:
-                f.write(json.dumps(entry, ensure_ascii=False) + '\n')
-        status_log.append(f"Generated train_vibevoice.jsonl with {len(jsonl_entries)} entries")
-    except Exception as e:
-        return f"Error: Failed to write train_vibevoice.jsonl: {str(e)}"
-
-    # ============== STEP 2: Train VibeVoice LoRA ==============
-    status_log.append("")
-    status_log.append("=" * 60)
-    status_log.append("STEP 2/2: TRAINING VIBEVOICE LORA")
-    status_log.append("=" * 60)
-    progress(0.0, desc="Starting VibeVoice training...")
-
-    train_script = project_root / "modules" / "vibevoice_tts" / "finetune" / "train_vibevoice.py"
-
-    if not train_script.exists():
-        status_log.append("[X] VibeVoice training script not found!")
-        return "\n".join(status_log)
-
-    # Try FranckyB variant first (same weights, often already cached
-    # from voice cloning), then fall back to vibevoice org.
-    if base_model_size == "7B":
-        base_model_candidates = ["FranckyB/VibeVoice-Large", "vibevoice/VibeVoice-7B"]
-    else:
-        base_model_candidates = ["FranckyB/VibeVoice-1.5B", "vibevoice/VibeVoice-1.5B"]
-    base_model_path = None
-
-    # Check local models/ directory first
-    for candidate in base_model_candidates:
-        local = check_model_available_locally(candidate)
-        if local:
-            base_model_path = str(local)
-            status_log.append(f"[OK] Using local model: {base_model_path}")
-            break
-
-    # Fall back to HF cache / download
-    if not base_model_path:
-        from huggingface_hub import snapshot_download
-        offline_mode = user_config.get("offline_mode", False)
-        for candidate in base_model_candidates:
-            try:
-                base_model_path = snapshot_download(
-                    repo_id=candidate,
-                    allow_patterns=["*.json", "*.safetensors", "*.txt", "*.npz", "*.model"],
-                    local_files_only=offline_mode
-                )
-                status_log.append(f"[OK] Using cached model ({candidate}): {base_model_path}")
-                break
-            except Exception:
-                continue
-
-    if not base_model_path:
-        status_log.append(f"[X] Failed to locate VibeVoice-{base_model_size} base model. "
-                          "Download it via Model Management or run voice cloning first.")
-        return "\n".join(status_log)
-
-    use_bf16 = torch.cuda.is_available()
-
-    train_cmd = [
+    cmd = [
         sys.executable,
         "-u",
-        str(train_script.absolute()),
-        "--model_name_or_path", base_model_path,
-        "--train_jsonl", str(train_jsonl_path),
-        "--output_dir", str(output_dir),
-        "--per_device_train_batch_size", str(int(batch_size)),
-        "--learning_rate", str(learning_rate),
-        "--num_train_epochs", str(int(num_epochs)),
-        "--ddpm_batch_mul", str(int(ddpm_batch_mul)),
-        "--diffusion_loss_weight", str(diffusion_loss_weight),
-        "--ce_loss_weight", str(ce_loss_weight),
-        "--voice_prompt_drop_rate", str(voice_prompt_drop_rate),
-        "--train_diffusion_head", str(train_diffusion_head),
-        "--gradient_accumulation_steps", str(int(gradient_accumulation_steps)),
-        "--warmup_steps", str(int(warmup_steps)),
-        "--ema_decay", str(float(ema_decay)),
-        "--logging_steps", "10",
-        "--do_train",
-        "--gradient_clipping",
-        "--max_grad_norm", "0.8",
-        "--lr_scheduler_type", "cosine",
+        str(train_script),
+        "--data-dir", str(dataset_dir),
+        "--speaker-index", str(speaker_index),
+        "--output-dir", str(output_dir),
+        "--checkpoint", str(model_paths["transformer"]),
+        "--full-checkpoint", str(model_paths["audio_components"]),
+        "--steps", str(steps),
+        "--lr", str(float(learning_rate or 3e-5)),
+        "--batch-size", str(max(1, int(batch_size or 1))),
+        "--save-every", str(max(50, int(save_interval or 500))),
+        "--grad-accum", str(max(1, int(gradient_accumulation_steps or 4))),
+        "--warmup-steps", str(max(0, int(warmup_steps or 0))),
+        "--lora-rank", str(max(1, int(lora_rank or 128))),
+        "--lora-alpha", str(max(1, int(lora_alpha or 128))),
+        "--lora-dropout", str(float(lora_dropout or 0.0)),
+        "--lr-scheduler", str(lr_scheduler or "cosine"),
+        "--base-model", str(base_model or "dev"),
+        "--ref-ratio", str(float(ref_ratio or 0.3)),
+        "--text-dropout", str(float(text_dropout or 0.0)),
+        "--seed", str(int(seed) if seed is not None else 42),
+        "--log-every", "10",
     ]
 
-    # Always train connectors when training diffusion head — they bridge
-    # the LoRA-modified LLM hidden states to the diffusion head's input space
-    if train_diffusion_head:
-        train_cmd.extend(["--train_connectors", "True"])
+    if resume_lora and str(resume_lora).strip():
+        cmd.extend(["--resume-lora", str(resume_lora).strip()])
 
-    save_interval = int(save_interval) if save_interval else 0
-    if save_interval > 0:
-        train_cmd.extend(["--save_interval", str(save_interval)])
+    progress(0.0, desc="Starting DramaBox training...")
+    status_log = []
+    result = subprocess.Popen(
+        cmd,
+        cwd=str(dramabox_root),
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+        universal_newlines=True,
+    )
+    _active_training_process = result
 
-    if use_bf16:
-        train_cmd.append("--bf16")
+    total_steps = int(steps)
+    current_progress = 0.0
+    for line in result.stdout:
+        if _training_stop_requested:
+            break
+        line = line.strip()
+        if not line:
+            continue
+        status_log.append(line)
+        # Parse: "...Step 12/1000 | loss=0.4321 | ..."
+        if "Step " in line and "/" in line and "loss=" in line:
+            try:
+                step_part = line.split("Step ")[1].split(" ")[0]
+                current_step = int(step_part.split("/")[0])
+                current_progress = min(current_step / total_steps, 0.99)
+                loss_val = line.split("loss=")[1].split(" ")[0].rstrip("|").strip()
+                eta_str = ""
+                if "ETA " in line:
+                    eta_str = " | ETA " + line.split("ETA ")[1].split(" ")[0] + "min"
+                progress(current_progress, desc=f"Step {current_step}/{total_steps} | loss={loss_val}{eta_str}")
+            except Exception:
+                pass
+        else:
+            # Show all other log lines (model loading, dataset build, etc.)
+            # Strip the logging timestamp prefix if present: "2026-01-01 00:00:00,000 INFO msg"
+            msg = line
+            parts = line.split(" ", 3)
+            if len(parts) == 4 and parts[2] in ("INFO", "WARNING", "ERROR", "DEBUG"):
+                msg = parts[3]
+            if len(msg) > 120:
+                msg = msg[:117] + "..."
+            progress(current_progress, desc=msg)
 
-    status_log.append("")
-    status_log.append("Training configuration:")
-    status_log.append(f"  Base model: {base_model_path}")
-    status_log.append(f"  Batch size: {int(batch_size)}")
-    status_log.append(f"  Learning rate: {learning_rate}")
-    status_log.append(f"  Epochs: {int(num_epochs)}")
-    status_log.append(f"  DDPM batch multiplier: {int(ddpm_batch_mul)}")
-    status_log.append(f"  Diffusion loss weight: {diffusion_loss_weight}")
-    status_log.append(f"  CE loss weight: {ce_loss_weight}")
-    status_log.append(f"  Voice prompt drop rate: {voice_prompt_drop_rate}")
-    status_log.append(f"  Train diffusion head: {train_diffusion_head}")
-    status_log.append(f"  Gradient accumulation: {int(gradient_accumulation_steps)}")
-    status_log.append(f"  Warmup steps: {int(warmup_steps)}")
-    status_log.append(f"  EMA decay: {float(ema_decay)}" if float(ema_decay) > 0 else "  EMA decay: disabled")
-    status_log.append(f"  Save interval: {'every ' + str(save_interval) + ' epoch(s)' if save_interval > 0 else 'final only'}")
-    status_log.append(f"  Speaker name: {speaker_name.strip()}")
-    status_log.append(f"  Output: {output_dir}")
-    status_log.append("")
-    status_log.append("Starting training...")
-    status_log.append("")
+    if _training_stop_requested:
+        try:
+            result.kill()
+            result.wait(timeout=5)
+        except Exception:
+            pass
+        _active_training_process = None
+        return "Training stopped by user.\n" + "\n".join(status_log[-20:])
+
+    result.wait()
+    _active_training_process = None
+
+    if result.returncode != 0:
+        err = "\n".join(status_log[-50:])
+        return f"Error: DramaBox training failed (exit {result.returncode})\n{err}"
+
+    progress(1.0, desc="DramaBox training complete")
+    if play_completion_beep:
+        play_completion_beep()
+
+    # Auto-convert the best/final LoRA to LTX-compatible format
+    # Match speaker-named checkpoints: {slug}_dramabox_*.safetensors and {slug}_dramabox_best_*.safetensors
+    converted_paths = []
+    for lora_file in sorted(output_dir.glob("*_dramabox_*.safetensors")):
+        if lora_file.name.endswith("_ltx.safetensors"):
+            continue
+        ltx_path = convert_dramabox_lora_to_ltx(lora_file)
+        if ltx_path:
+            converted_paths.append(ltx_path.name)
+
+    msg = f"DramaBox training finished.\nOutput: {output_dir}"
+    if converted_paths:
+        msg += f"\nConverted for LTX inference: {', '.join(converted_paths)}"
+    return msg
+
+
+def convert_dramabox_lora_to_ltx(input_path, output_path=None):
+    """Convert a PEFT-format DramaBox LoRA to LTX-compatible safetensors format.
+
+    PEFT saves keys as:
+        base_model.model.<layer>.lora_A.default.weight
+    LTX fuse_loras expects:
+        <layer>.lora_A.weight
+
+    Args:
+        input_path: Path to the PEFT .safetensors LoRA file
+        output_path: Optional output path. Defaults to input with _ltx suffix.
+
+    Returns:
+        Path of the converted file, or None on failure.
+    """
+    import logging
+    from safetensors import safe_open
+    from safetensors.torch import save_file
+
+    input_path = Path(input_path)
+    if not input_path.exists():
+        logging.warning(f"LoRA converter: input not found: {input_path}")
+        return None
+
+    if output_path is None:
+        stem = input_path.stem
+        # Replace _dramabox with _ltx in the filename to keep naming consistent
+        # e.g. sleepy_dramabox_00100 → sleepy_ltx_00100
+        # e.g. sleepy_dramabox_best_00050 → sleepy_ltx_best_00050
+        # e.g. sleepy_dramabox → sleepy_ltx
+        if "_dramabox" in stem:
+            new_stem = stem.replace("_dramabox", "_ltx", 1)
+        else:
+            new_stem = stem + "_ltx"
+        ltx_dir = input_path.parent / "LTX"
+        ltx_dir.mkdir(exist_ok=True)
+        output_path = ltx_dir / (new_stem + ".safetensors")
+    output_path = Path(output_path)
 
     try:
-        global _active_training_process, _training_stop_requested
-        _training_stop_requested = False
+        tensors = {}
+        with safe_open(str(input_path), framework="pt") as f:
+            for key in f.keys():
+                # Strip PEFT prefix: base_model.model.<layer>... → <layer>...
+                clean = key
+                if clean.startswith("base_model.model."):
+                    clean = clean[len("base_model.model."):]
+                # Remove .default. infix: lora_A.default.weight → lora_A.weight
+                clean = clean.replace(".lora_A.default.weight", ".lora_A.weight")
+                clean = clean.replace(".lora_B.default.weight", ".lora_B.weight")
+                tensors[clean] = f.get_tensor(key)
 
-        env = os.environ.copy()
-        env['TRANSFORMERS_NO_ADVISORY_WARNINGS'] = '1'
-        env['TOKENIZERS_PARALLELISM'] = 'false'
-        # Ensure project root is on PYTHONPATH so "from modules.*" imports work
-        env['PYTHONPATH'] = str(project_root) + os.pathsep + env.get('PYTHONPATH', '')
-
-        result = subprocess.Popen(
-            train_cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-            universal_newlines=True,
-            env=env
-        )
-        _active_training_process = result
-
-        total_epochs = int(num_epochs)
-
-        # Skip verbose HF Trainer config dumps and noisy warnings
-        _vv_noise = (
-            'TrainingArguments(', 'CustomTrainingArguments(',
-            'IntervalStrategy.', 'SchedulerType.', 'SaveStrategy.',
-            'OptimizerNames.', 'HubStrategy.',
-            '<HUB_TOKEN>', '<PUSH_TO_HUB_TOKEN>',
-            'is deprecated', 'tokenizer class you load',
-            'It may result in unexpected', 'The class this function',
-            'Loading checkpoint shards:',
-            'accelerator_config=', 'fsdp_config=',
-        )
-        # Lines that are just config key=value pairs from the dump
-        _vv_config_prefixes = (
-            '_n_gpu=', 'adafactor=', 'adam_', 'auto_find', 'average_tokens',
-            'batch_eval', 'bf16', 'ce_loss_weight=', 'data_seed',
-            'dataloader_', 'ddp_', 'ddpm_batch_mul=', 'debug=', 'deepspeed=',
-            'diffusion_loss_weight=', 'disable_tqdm', 'do_eval=', 'do_predict=',
-            'do_train=', 'eval_', 'fp16', 'fsdp', 'full_determinism',
-            'gradient_', 'greater_is_better', 'group_by_length',
-            'half_precision', 'hub_', 'ignore_data', 'include_',
-            'jit_mode', 'label_', 'learning_rate=', 'length_column',
-            'liger_', 'load_best', 'local_rank', 'log_', 'logging_',
-            'lr_scheduler', 'max_grad', 'max_steps', 'metric_for',
-            'mp_parameters', 'neftune', 'no_cuda', 'num_train_epochs=',
-            'optim', 'output_dir=', 'overwrite_', 'parallelism',
-            'past_index', 'per_device_', 'prediction_loss', 'project=',
-            'push_to_hub', 'ray_scope', 'remove_unused', 'report_to=',
-            'restore_callback', 'resume_from', 'run_name', 'save_',
-            'seed=', 'skip_memory', 'tf32', 'torch_compile', 'torch_empty',
-            'torchdynamo', 'tpu_', 'trackio', 'use_cpu', 'use_legacy',
-            'use_liger', 'use_mps', 'warmup_', 'weight_decay', ')',
-        )
-
-        for line in result.stdout:
-            if _training_stop_requested:
-                break
-            line = line.strip()
-            if line:
-                # Skip verbose config dump and noisy warnings
-                if any(p in line for p in _vv_noise):
-                    continue
-                if line.startswith(_vv_config_prefixes):
-                    continue
-
-                # Skip tqdm progress bars (e.g. "  23%|##3       | 7/30 [00:27...")
-                if '%|' in line and '[' in line and '/' in line:
-                    continue
-
-                # Parse loss dicts: show clean summary instead of raw dicts
-                if ("'train/ce_loss'" in line or "'train/diffusion_loss'" in line
-                        or "'loss'" in line) and "'epoch'" in line:
-                    try:
-                        import re
-                        epoch_match = re.search(r"'epoch':\s*([\d.]+)", line)
-                        if epoch_match:
-                            current_epoch = float(epoch_match.group(1))
-                            progress_val = current_epoch / total_epochs
-
-                            # Extract losses
-                            diff_match = re.search(r"'(?:train/)?diffusion_loss':\s*([\d.]+)", line)
-                            ce_match = re.search(r"'(?:train/)?ce_loss':\s*([\d.]+)", line)
-                            loss_match = re.search(r"'loss':\s*([\d.]+)", line)
-
-                            # Build clean summary
-                            parts = [f"Epoch {current_epoch:.1f}/{total_epochs}"]
-                            if diff_match:
-                                parts.append(f"Diff Loss: {float(diff_match.group(1)):.4f}")
-                            if ce_match:
-                                parts.append(f"CE Loss: {float(ce_match.group(1)):.2f}")
-                            if loss_match and not diff_match:
-                                parts.append(f"Loss: {float(loss_match.group(1)):.4f}")
-                            summary = " | ".join(parts)
-
-                            # Only log when epoch changes (avoid duplicate per-step lines)
-                            epoch_key = f"{current_epoch:.1f}"
-                            if not hasattr(result, '_last_epoch') or result._last_epoch != epoch_key:
-                                result._last_epoch = epoch_key
-                                status_log.append(f"  {summary}")
-
-                            # Update progress bar
-                            loss_desc = ""
-                            if diff_match:
-                                loss_desc = f" | Loss: {float(diff_match.group(1)):.4f}"
-                            elif loss_match:
-                                loss_desc = f" | Loss: {float(loss_match.group(1)):.4f}"
-                            progress(
-                                min(progress_val, 0.99),
-                                desc=f"Training: Epoch {current_epoch:.1f}/{total_epochs}{loss_desc}"
-                            )
-                    except Exception:
-                        pass
-                    continue
-
-                # Skip other raw loss dict lines without epoch info
-                if line.startswith('{') and ('loss' in line or 'train/' in line):
-                    continue
-
-                status_log.append(f"  {line}")
-
-        if _training_stop_requested:
-            try:
-                result.kill()
-                result.wait(timeout=5)
-            except Exception:
-                pass
-            _active_training_process = None
-            status_log.append("")
-            status_log.append("Training stopped by user.")
-            return "\n".join(status_log)
-
-        result.wait()
-        _active_training_process = None
-
-        if result.returncode != 0:
-            status_log.append("")
-            status_log.append(f"[X] Training failed with exit code {result.returncode}")
-            return "\n".join(status_log)
-
-        status_log.append("")
-        status_log.append("=" * 60)
-        status_log.append("TRAINING COMPLETED SUCCESSFULLY!")
-        status_log.append("=" * 60)
-        status_log.append(f"LoRA model saved to: {output_dir}")
-
-        # Save metadata so inference knows which base model to load.
-        # Stored inside the lora/ folder so it travels with the model if shared.
-        import json as json_mod
-        metadata = {
-            "base_model_size": base_model_size or "1.5B",
-            "speaker_name": speaker_name.strip(),
-        }
-        lora_dir = output_dir / "lora"
-        if lora_dir.is_dir():
-            metadata_path = lora_dir / "vcs_metadata.json"
-        else:
-            metadata_path = output_dir / "vcs_metadata.json"
-        try:
-            metadata_path.write_text(json_mod.dumps(metadata, indent=2), encoding="utf-8")
-        except Exception:
-            pass  # Non-critical — inference will fall back to 1.5B
-
-        # Also write metadata into any interval checkpoint lora/ dirs
-        for ckpt in output_dir.glob("checkpoint-epoch-*/lora"):
-            try:
-                (ckpt / "vcs_metadata.json").write_text(
-                    json_mod.dumps(metadata, indent=2), encoding="utf-8"
-                )
-            except Exception:
-                pass
-
-        status_log.append(f"Speaker name: {speaker_name.strip()}")
-        status_log.append("")
-        status_log.append("To use your trained model:")
-        status_log.append("  1. Go to Voice Presets tab")
-        status_log.append("  2. Select 'VibeVoice Trained' radio button")
-        status_log.append(f"  3. Click refresh and select '{speaker_name.strip()}'")
-
-        progress(1.0, desc="Training complete!")
-        if play_completion_beep:
-            play_completion_beep()
+        metadata = {"reference_downscale_factor": "1"}
+        save_file(tensors, str(output_path), metadata=metadata)
+        logging.info(f"LoRA converter: saved {len(tensors)} keys to {output_path.name}")
+        return output_path
 
     except Exception as e:
-        status_log.append(f"[X] Error during training: {str(e)}")
-        return "\n".join(status_log)
-
-    return "\n".join(status_log)
+        logging.warning(f"LoRA converter: failed for {input_path.name}: {e}")
+        return None

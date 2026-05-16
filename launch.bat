@@ -1,6 +1,6 @@
 @echo off
 echo ========================================
-echo   Voice Clone Studio
+echo   Voice Clone Studio DramaBox Edition
 echo ========================================
 echo.
 

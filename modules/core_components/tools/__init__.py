@@ -11,14 +11,11 @@ import json
 import markdown
 import platform
 from pathlib import Path
-# from modules.core_components.tool_base import ToolConfig, Tool
+from modules.core_components.tool_base import Tool
 
 # Import all tool modules here
 from modules.core_components.tools import voice_clone
-from modules.core_components.tools import voice_presets
-from modules.core_components.tools import voice_changer
 from modules.core_components.tools import conversation
-from modules.core_components.tools import voice_design
 from modules.core_components.tools import sound_effects
 from modules.core_components.tools import prep_audio
 from modules.core_components.tools import train_model
@@ -30,10 +27,7 @@ from modules.core_components.tools import settings
 # Format: 'tool_name': (module, ToolConfig)
 ALL_TOOLS = {
     'voice_clone': (voice_clone, voice_clone.VoiceCloneTool.config),
-    'voice_presets': (voice_presets, voice_presets.VoicePresetsTool.config),
-    'voice_changer': (voice_changer, voice_changer.VoiceChangerTool.config),
     'conversation': (conversation, conversation.ConversationTool.config),
-    'voice_design': (voice_design, voice_design.VoiceDesignTool.config),
     'sound_effects': (sound_effects, sound_effects.SoundEffectsTool.config),
     'prep_audio': (prep_audio, prep_audio.PrepSamplesTool.config),
     'train_model': (train_model, train_model.TrainModelTool.config),
@@ -90,7 +84,7 @@ def create_enabled_tools(shared_state):
     Create UI for all enabled tools.
 
     Args:
-        shared_state: Shared globals (must include: _user_config, _active_emotions, and all helper functions)
+        shared_state: Shared globals (must include: _user_config and all helper functions)
 
     Returns:
         Dict mapping tool name to component references
@@ -291,6 +285,7 @@ def load_config():
         "low_cpu_mem_usage": False,
         "attention_mechanism": "auto",
         "offline_mode": False,
+        "dramabox_cpu_offload": False,
         "browser_notifications": True,
         "samples_folder": "samples",
         "output_folder": "output",
@@ -298,7 +293,6 @@ def load_config():
         "temp_folder": "temp",
         "models_folder": "models",
         "trained_models_folder": "trained_models",
-        "emotions": None,
         "conv_model_type": "Qwen Speakers",
         "conv_model_size": "Large",
         "conv_base_model_size": "Large",
@@ -723,7 +717,7 @@ def get_or_create_voice_prompt_standalone(model, sample_name, wav_path, ref_text
     return prompt_items, False  # False = newly created
 
 
-def build_shared_state(user_config, active_emotions, directories, constants, managers=None, confirm_trigger=None, input_trigger=None, prompt_apply_trigger=None):
+def build_shared_state(user_config, directories, constants, managers=None, confirm_trigger=None, input_trigger=None, prompt_apply_trigger=None):
     """
     Build shared_state dictionary for main app or standalone testing.
 
@@ -731,7 +725,6 @@ def build_shared_state(user_config, active_emotions, directories, constants, man
 
     Args:
         user_config: User configuration dict
-        active_emotions: Active emotions dict
         directories: Dict with keys: OUTPUT_DIR, SAMPLES_DIR, DATASETS_DIR, TEMP_DIR
         constants: Dict with keys: LANGUAGES, CUSTOM_VOICE_SPEAKERS, MODEL_SIZES_*, etc.
         managers: Optional dict with keys: tts_manager, asr_manager (for main app)
@@ -743,11 +736,7 @@ def build_shared_state(user_config, active_emotions, directories, constants, man
     """
     from modules.core_components import (
         show_confirmation_modal_js,
-        show_input_modal_js,
-        get_emotion_choices,
-        calculate_emotion_values,
-        handle_save_emotion,
-        handle_delete_emotion
+        show_input_modal_js
     )
     from modules.core_components.ui_components import (
         create_qwen_advanced_params,
@@ -755,7 +744,7 @@ def build_shared_state(user_config, active_emotions, directories, constants, man
         create_luxtts_advanced_params,
         create_chatterbox_advanced_params,
         create_fish_speech_advanced_params,
-        create_emotion_intensity_slider,
+        create_dramabox_advanced_params,
         create_pause_controls
     )
     from modules.core_components.ai_models.model_utils import (
@@ -764,7 +753,8 @@ def build_shared_state(user_config, active_emotions, directories, constants, man
         train_model as train_model_util,
         download_model_from_huggingface as download_model_util,
         get_trained_vibevoice_models as get_trained_vibevoice_models_util,
-        train_vibevoice_model as train_vibevoice_model_util,
+        train_dramabox_model as train_dramabox_model_util,
+        convert_dramabox_lora_to_ltx as convert_dramabox_lora_to_ltx_util,
         stop_training as stop_training_util,
         is_training_active as is_training_active_util,
     )
@@ -859,10 +849,9 @@ def build_shared_state(user_config, active_emotions, directories, constants, man
         return result
 
     shared_state = {
-        # Config & Emotions
+        # Config
         'user_config': user_config,
         '_user_config': user_config,
-        '_active_emotions': active_emotions,
 
         # Directories
         'OUTPUT_DIR': directories.get('OUTPUT_DIR'),
@@ -897,11 +886,8 @@ def build_shared_state(user_config, active_emotions, directories, constants, man
         'create_luxtts_advanced_params': create_luxtts_advanced_params,
         'create_chatterbox_advanced_params': create_chatterbox_advanced_params,
         'create_fish_speech_advanced_params': create_fish_speech_advanced_params,
-        'create_emotion_intensity_slider': create_emotion_intensity_slider,
+        'create_dramabox_advanced_params': create_dramabox_advanced_params,
         'create_pause_controls': create_pause_controls,
-
-        # Emotion management
-        'get_emotion_choices': get_emotion_choices,
 
         # Core utilities
         'play_completion_beep': play_completion_beep,
@@ -931,15 +917,18 @@ def build_shared_state(user_config, active_emotions, directories, constants, man
         'get_trained_vibevoice_models': lambda: get_trained_vibevoice_models_util(
             directories.get('OUTPUT_DIR').parent / user_config.get("trained_models_folder", "trained_models")
         ),
-        'train_vibevoice_model': lambda folder, speaker_name, batch_size, lr, epochs, save_interval, ddpm_batch_mul, diffusion_loss_weight, ce_loss_weight, voice_prompt_drop, train_diffusion_head, gradient_accumulation, warmup_steps, ema_decay, base_model_size, progress=None: train_vibevoice_model_util(
+        'train_dramabox_model': lambda folder, speaker_name, batch_size, lr, epochs, save_interval, gradient_accumulation, warmup_steps, lora_rank, lora_alpha, lora_dropout, lr_scheduler, base_model, ref_ratio, text_dropout, seed, resume_lora, progress=None: train_dramabox_model_util(
             folder, speaker_name, batch_size, lr, epochs,
-            save_interval, ddpm_batch_mul, diffusion_loss_weight,
-            ce_loss_weight, voice_prompt_drop, train_diffusion_head,
-            gradient_accumulation, warmup_steps, ema_decay, base_model_size,
+            save_interval, gradient_accumulation, warmup_steps,
+            lora_rank, lora_alpha, lora_dropout,
+            lr_scheduler, base_model, ref_ratio,
+            text_dropout, seed, resume_lora,
             user_config, directories.get('DATASETS_DIR'),
             directories.get('OUTPUT_DIR').parent,  # project_root
             play_completion_beep, progress
         ),
+
+        'convert_dramabox_lora_to_ltx': convert_dramabox_lora_to_ltx_util,
 
         # Training control
         'stop_training': stop_training_util,
@@ -977,12 +966,6 @@ def build_shared_state(user_config, active_emotions, directories, constants, man
     }
 
     # Lambdas that reference shared_state (must be added after dict creation)
-    shared_state['save_emotion_handler'] = lambda name, intensity, temp, rep_pen, top_p: handle_save_emotion(
-        shared_state['_active_emotions'], name, intensity, temp, rep_pen, top_p
-    )
-    shared_state['delete_emotion_handler'] = lambda confirm_val, emotion_name: handle_delete_emotion(
-        shared_state['_active_emotions'], confirm_val, emotion_name
-    )
     shared_state['save_preference'] = lambda k, v: save_config(shared_state['_user_config'], k, v)
 
     # Audio save utilities
@@ -1033,16 +1016,12 @@ def run_tool_standalone(ToolClass, port=7860, title="Tool - Standalone", extra_s
     Handles all boilerplate: config loading, shared_state setup, modal initialization, and app launch.
 
     Args:
-        ToolClass: The Tool class to run (e.g., VoicePresetsTool)
+        ToolClass: The Tool class to run (e.g., VoiceCloneTool)
         port: Server port (default: 7860)
         title: Window title (default: "Tool - Standalone")
         extra_shared_state: Optional dict of tool-specific shared_state entries to add/override
 
     Usage:
-        if __name__ == "__main__":
-            from modules.core_components.tools import run_tool_standalone
-            run_tool_standalone(VoicePresetsTool, port=7863, title="Voice Presets - Standalone")
-
         # With tool-specific helpers:
         if __name__ == "__main__":
             extra = {'get_sample_choices': lambda: ['sample1', 'sample2']}
@@ -1056,8 +1035,7 @@ def run_tool_standalone(ToolClass, port=7860, title="Tool - Standalone", extra_s
         CONFIRMATION_MODAL_HTML,
         INPUT_MODAL_CSS,
         INPUT_MODAL_HEAD,
-        INPUT_MODAL_HTML,
-        load_emotions_from_config
+        INPUT_MODAL_HTML
     )
     from modules.core_components.constants import (
         LANGUAGES,
@@ -1076,9 +1054,8 @@ def run_tool_standalone(ToolClass, port=7860, title="Tool - Standalone", extra_s
     # Find project root
     project_root = CONFIG_FILE.parent
 
-    # Load config and emotions
+    # Load config
     user_config = load_config()
-    active_emotions = load_emotions_from_config(user_config)
 
     # Setup directories
     OUTPUT_DIR = project_root / user_config.get("output_folder", "output")
@@ -1127,7 +1104,6 @@ def run_tool_standalone(ToolClass, port=7860, title="Tool - Standalone", extra_s
         # Build shared_state using centralized helper
         shared_state = build_shared_state(
             user_config=user_config,
-            active_emotions=active_emotions,
             directories={
                 'OUTPUT_DIR': OUTPUT_DIR,
                 'SAMPLES_DIR': SAMPLES_DIR,

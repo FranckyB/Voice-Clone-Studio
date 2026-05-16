@@ -75,6 +75,17 @@ echo ""
 read -t 30 -p "Install llama.cpp? (y/N, default N in 30s): " INSTALL_LLAMA
 INSTALL_LLAMA=${INSTALL_LLAMA:-N}
 echo ""
+
+echo "========================================="
+echo "Optional: Install DeepFilterNet for audio denoising?"
+echo "DeepFilterNet removes background noise from voice samples."
+echo "Note: Linux may require Rust compiler for source builds."
+echo "========================================="
+echo ""
+read -t 30 -p "Install DeepFilterNet? (y/N, default N in 30s): " INSTALL_DEEPFILTER
+INSTALL_DEEPFILTER=${INSTALL_DEEPFILTER:-N}
+echo ""
+
 echo "All questions answered - installing now..."
 echo ""
 
@@ -124,14 +135,18 @@ echo "Installing Fish Speech S2 codec..."
 pip install --no-deps descript-audio-codec descript-audiotools >/dev/null 2>&1 || true
 
 # DeepFilterNet audio denoising (optional - requires Rust compiler for source build)
-echo ""
-echo "Installing DeepFilterNet (audio denoising)..."
-if pip install deepfilternet; then
-    echo "DeepFilterNet installed successfully!"
+if [[ "$INSTALL_DEEPFILTER" =~ ^[Yy]$ ]]; then
+    echo ""
+    echo "Installing DeepFilterNet (audio denoising)..."
+    if pip install deepfilternet; then
+        echo "DeepFilterNet installed successfully!"
+    else
+        echo "WARNING: DeepFilterNet installation failed (requires Rust compiler to build from source)."
+        echo "Audio denoising will not be available, but all other features will work normally."
+        echo "To install later: Install Rust from https://rustup.rs then run: pip install deepfilternet"
+    fi
 else
-    echo "WARNING: DeepFilterNet installation failed (requires Rust compiler to build from source)."
-    echo "Audio denoising will not be available, but all other features will work normally."
-    echo "To install later: Install Rust from https://rustup.rs then run: pip install deepfilternet"
+    echo "Skipping DeepFilterNet installation."
 fi
 
 # Faster Qwen3 TTS (CUDA graph acceleration, lightweight - auto-install)
@@ -179,12 +194,12 @@ else
     echo "Skipping LuxTTS installation."
 fi
 
-# Qwen3 ASR (installed with --no-deps to avoid transformers conflict with qwen-tts)
+# Qwen3 ASR
 if [[ "$INSTALL_QWEN3ASR" =~ ^[Yy]$ ]]; then
     echo ""
     echo "Installing Qwen3 ASR..."
     pip install nagisa soynlp qwen-omni-utils pytz flask
-    if pip install --no-deps qwen-asr; then
+    if pip install qwen-asr; then
         echo "Qwen3 ASR installed successfully!"
     else
         echo "Qwen3 ASR installation failed."

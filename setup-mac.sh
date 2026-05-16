@@ -96,6 +96,17 @@ echo ""
 read -t 30 -p "Install llama.cpp? (y/N, default N in 30s): " INSTALL_LLAMA
 INSTALL_LLAMA=${INSTALL_LLAMA:-N}
 echo ""
+
+echo "========================================="
+echo "Optional: Install DeepFilterNet for audio denoising?"
+echo "DeepFilterNet removes background noise from voice samples."
+echo "Note: installation may fail on some macOS environments."
+echo "========================================="
+echo ""
+read -t 30 -p "Install DeepFilterNet? (y/N, default N in 30s): " INSTALL_DEEPFILTER
+INSTALL_DEEPFILTER=${INSTALL_DEEPFILTER:-N}
+echo ""
+
 echo "All questions answered - installing now..."
 echo ""
 
@@ -186,14 +197,19 @@ if [ -f "requirements_linux.txt" ]; then
         echo "4-bit quantization will not be available."
     fi
 
-    # Try deepfilternet
-    echo ""
-    echo "Installing DeepFilterNet (audio denoising)..."
-    if pip install deepfilternet 2>/dev/null; then
-        echo "DeepFilterNet installed"
+    # Try deepfilternet (optional)
+    if [[ "$INSTALL_DEEPFILTER" =~ ^[Yy]$ ]]; then
+        echo ""
+        echo "Installing DeepFilterNet (audio denoising)..."
+        if pip install deepfilternet 2>/dev/null; then
+            echo "DeepFilterNet installed"
+        else
+            echo "WARNING: DeepFilterNet installation failed."
+            echo "Audio denoising will not be available."
+        fi
     else
-        echo "WARNING: DeepFilterNet installation failed."
-        echo "Audio denoising will not be available."
+        echo ""
+        echo "Skipping DeepFilterNet installation."
     fi
 else
     echo "ERROR: requirements_linux.txt not found!"
@@ -224,12 +240,12 @@ else
     echo "Skipping LuxTTS installation."
 fi
 
-# Qwen3 ASR (installed with --no-deps to avoid transformers conflict with qwen-tts)
+# Qwen3 ASR
 if [[ "$INSTALL_QWEN3ASR" =~ ^[Yy]$ ]]; then
     echo ""
     echo "Installing Qwen3 ASR..."
     pip install nagisa soynlp qwen-omni-utils pytz flask
-    if pip install --no-deps qwen-asr; then
+    if pip install qwen-asr; then
         echo "Qwen3 ASR installed successfully!"
     else
         echo "Qwen3 ASR installation failed."

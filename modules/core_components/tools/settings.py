@@ -18,8 +18,7 @@ import torch as _torch
 from pathlib import Path
 from modules.core_components.tool_base import Tool, ToolConfig
 from modules.core_components.help_page import (
-    show_voice_clone_help, show_conversation_help, show_voice_presets_help,
-    show_voice_design_help, show_prep_audio_help, show_dataset_help,
+    show_voice_clone_help, show_prep_audio_help, show_dataset_help,
     show_train_help, show_tips_help
 )
 
@@ -27,10 +26,7 @@ from modules.core_components.help_page import (
 # Format: (config_key, display_label)
 TOGGLEABLE_TOOLS = [
     ("Voice Clone", "Voice Clone"),
-    ("Voice Changer", "Voice Changer"),
-    ("Voice Presets", "Voice Presets"),
     ("Conversation", "Conversation"),
-    ("Voice Design", "Voice Design"),
     ("Prep Samples", "Prep Samples"),
     ("Train Model", "Train Model"),
     ("Sound Effects", "Sound Effects"),
@@ -83,43 +79,6 @@ class SettingsTool(Tool):
                                         )
 
                             with gr.Column():
-                                gr.Markdown("### Available Voice Clone Engines")
-
-                                # Get TTS_ENGINES from shared_state
-                                TTS_ENGINES = shared_state.get('TTS_ENGINES', {})
-                                engine_settings = _user_config.get("enabled_engines", {})
-
-                                for engine_key, engine_info in TTS_ENGINES.items():
-                                    is_enabled = engine_settings.get(
-                                        engine_key, engine_info.get("default_enabled", True)
-                                    )
-                                    components[f'engine_toggle_{engine_key}'] = gr.Checkbox(
-                                        label=engine_info["label"],
-                                        value=is_enabled,
-                                        interactive=True
-                                    )
-
-                                gr.Markdown("### Available Transcription Engines")
-                                ASR_ENGINES = shared_state.get('ASR_ENGINES', {})
-                                asr_settings = _user_config.get("enabled_asr_engines", {})
-                                with gr.Column():
-                                    for engine_key, engine_info in ASR_ENGINES.items():
-                                        is_enabled = asr_settings.get(
-                                            engine_key, engine_info.get("default_enabled", True)
-                                        )
-                                        components[f'asr_toggle_{engine_key}'] = gr.Checkbox(
-                                            label=engine_info["label"],
-                                            value=is_enabled,
-                                            interactive=True
-                                        )
-
-                                    components['bypass_split_limit'] = gr.Checkbox(
-                                        label="Allow Qwen3 extended audio splitting (beyond 5 min)",
-                                        value=_user_config.get("bypass_split_limit", False),
-                                        info="Qwen3 ASR alignment may be less accurate and \ndemand tons of VRAM for very long audio. Enable with caution.",
-                                        interactive=True
-                                    )
-                            with gr.Column():
                                 gr.Markdown("### LLM Backend (Prompt Manager)")
 
                                 _current_llm_backend = _user_config.get("llm_backend", "llama.cpp")
@@ -158,21 +117,14 @@ class SettingsTool(Tool):
                                     )
                                     components['reset_ollama_url_btn'] = gr.Button("Reset", size="sm")
 
-                        with gr.Row():
                             with gr.Column():
 
                                 gr.Markdown("### Model Optimizations")
-                                components['settings_low_cpu_mem'] = gr.Checkbox(
-                                    label="Low CPU Memory Usage (Slower loading time)",
-                                    value=_user_config.get("low_cpu_mem_usage", False),
-                                    info="Reduces CPU RAM usage when loading models."
-                                )
-
-                                components['settings_attention_mechanism'] = gr.Dropdown(
-                                    label="Choose Attention Mechanism",
-                                    choices=["auto", "flash_attention_2", "sdpa", "eager"],
-                                    value=_user_config.get("attention_mechanism", "auto"),
-                                    info="Auto = fastest available."
+                                components['settings_dramabox_cpu_offload'] = gr.Checkbox(
+                                    label="DramaBox CPU Offloading",
+                                    value=_user_config.get("dramabox_cpu_offload", False),
+                                    info="Keep models on CPU between generations. Saves VRAM but slow — disable for fast warm-server mode.",
+                                    interactive=True
                                 )
 
                                 components['settings_skip_engine_check'] = gr.Checkbox(
@@ -180,8 +132,6 @@ class SettingsTool(Tool):
                                     value=_user_config.get("skip_engine_check", False),
                                     info="Assumes all engines are available. Faster launch. (Restart required)"
                                 )
-
-                            with gr.Column():
 
                                 gr.Markdown("### Model Downloading")
                                 components['settings_offline_mode'] = gr.Checkbox(
@@ -194,57 +144,24 @@ class SettingsTool(Tool):
                                     label="Select Model to Download to Models Folder",
                                     info="Needed to work in offline mode.\nFor Whisper models, copy local files to models folder",
                                     choices=[
-                                        "--- Qwen3-TTS Base ---",
-                                        "Qwen3-TTS-12Hz-0.6B-Base",
-                                        "Qwen3-TTS-12Hz-1.7B-Base",
-                                        "--- Qwen3-TTS CustomVoice ---",
-                                        "Qwen3-TTS-12Hz-0.6B-CustomVoice",
-                                        "Qwen3-TTS-12Hz-1.7B-CustomVoice",
-                                        "--- Qwen3-TTS VoiceDesign ---",
-                                        "Qwen3-TTS-12Hz-1.7B-VoiceDesign",
-                                        "--- VibeVoice TTS ---",
-                                        "VibeVoice-1.5B",
-                                        "VibeVoice-Large (4-bit)",
-                                        "VibeVoice-Large",
-                                        "--- VibeVoice ASR ---",
-                                        "VibeVoice-ASR",
-                                        "--- Chatterbox ---",
-                                        "Chatterbox",
-                                        "--- LuxTTS ---",
-                                        "LuxTTS",
+                                        "--- DramaBox ---",
+                                        "DramaBox DiT v1",
+                                        "DramaBox Audio Components",
+                                        "--- ASR ---",
+                                        "Qwen3-ASR-Small",
+                                        "Qwen3-ASR-Large",
                                     ],
-                                    value="Qwen3-TTS-12Hz-0.6B-Base"
+                                    value="DramaBox DiT v1"
                                 )
                                 components['download_btn'] = gr.Button("Download Model", scale=1)
 
                                 # Mapping from display names to HuggingFace model IDs
                                 components['MODEL_ID_MAP'] = {
-                                    "Qwen3-TTS-12Hz-0.6B-Base": "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
-                                    "Qwen3-TTS-12Hz-1.7B-Base": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
-                                    "Qwen3-TTS-12Hz-0.6B-CustomVoice": "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
-                                    "Qwen3-TTS-12Hz-1.7B-CustomVoice": "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
-                                    "Qwen3-TTS-12Hz-1.7B-VoiceDesign": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
-                                    "VibeVoice-1.5B": "FranckyB/VibeVoice-1.5B",
-                                    "VibeVoice-Large (4-bit)": "FranckyB/VibeVoice-Large-4bit",
-                                    "VibeVoice-Large": "FranckyB/VibeVoice-Large",
-                                    "VibeVoice-ASR": "microsoft/VibeVoice-ASR",
-                                    "Chatterbox": "ResembleAI/chatterbox",
-                                    "LuxTTS": "YatharthS/LuxTTS",
+                                    "DramaBox DiT v1": "ResembleAI/DramaBox-DiT-v1",
+                                    "DramaBox Audio Components": "ResembleAI/DramaBox-Audio-Components",
+                                    "Qwen3-ASR-Small": "Qwen/Qwen3-ASR-0.6B",
+                                    "Qwen3-ASR-Large": "Qwen/Qwen3-ASR-1.7B",
                                 }
-
-                            with gr.Column():
-                                gr.Markdown("### Output")
-                                components['settings_output_format'] = gr.Dropdown(
-                                    label="Output Format",
-                                    choices=["wav", "flac", "mp3"],
-                                    value=_user_config.get("output_format", "wav"),
-                                    info="Format for saved audio files. MP3 uses 320kbps."
-                                )
-                                components['settings_manual_save'] = gr.Checkbox(
-                                    label="Review Before Saving",
-                                    value=_user_config.get("manual_save", False),
-                                    info="Results stay in temp until you click Save.\nLets you keep only the ones you like. (Restart required)"
-                                )
 
                         with gr.Row():
                             with gr.Column():
@@ -278,19 +195,7 @@ class SettingsTool(Tool):
 
                             with gr.Column():
                                 if _torch.cuda.is_available():
-                                    gr.Markdown("### Faster-Qwen3-TTS")
-                                    try:
-                                        import faster_qwen3_tts as _fqt  # noqa: F401
-                                        components['settings_cuda_graphs'] = gr.Checkbox(
-                                            label="CUDA Graphs Acceleration",
-                                            value=_user_config.get("cuda_graphs", True),
-                                            info="5-10x faster Qwen3 inference via CUDA graphs. Disable if you get errors."
-                                        )
-                                    except ImportError:
-                                        gr.Markdown(
-                                            "CUDA Graphs not available. Run setup script or install manually:\n\n"
-                                            "`pip install faster-qwen3-tts`"
-                                        )
+                                    gr.Markdown("")
 
                                 # GPU Assignment (only shown when multiple CUDA GPUs available)
                                 from modules.core_components.ai_models.model_utils import get_available_gpus
@@ -321,6 +226,19 @@ class SettingsTool(Tool):
                                         )
                                 else:
                                     gr.Markdown("")
+
+                                gr.Markdown("### Output")
+                                components['settings_output_format'] = gr.Dropdown(
+                                    label="Output Format",
+                                    choices=["wav", "flac", "mp3"],
+                                    value=_user_config.get("output_format", "wav"),
+                                    info="Format for saved audio files. MP3 uses 320kbps."
+                                )
+                                components['settings_manual_save'] = gr.Checkbox(
+                                    label="Review Before Saving",
+                                    value=_user_config.get("manual_save", False),
+                                    info="Results stay in temp until you click Save.\nLets you keep only the ones you like. (Restart required)"
+                                )
 
                         gr.Markdown("Configure where files are stored. Changes apply after clicking **Apply Changes**.")
                         # Default folder paths
@@ -365,7 +283,7 @@ class SettingsTool(Tool):
                                 components['settings_models_folder'] = gr.Textbox(
                                     label="Downloaded Models Folder",
                                     value=_user_config.get("models_folder", default_folders["models"]),
-                                    info="Folder for downloaded model files (Qwen, VibeVoice)"
+                                    info="Folder for downloaded model files (Qwen, DramaBox, MMAudio)"
                                 )
                                 components['reset_models_btn'] = gr.Button("Reset", size="sm")
 
@@ -394,9 +312,6 @@ class SettingsTool(Tool):
                     components['help_topic'] = gr.Radio(
                         choices=[
                             "Voice Clone",
-                            "Voice Presets",
-                            "Conversation",
-                            "Voice Design",
                             "Prep Samples",
                             "Prep Dataset",
                             "Train Model",
@@ -429,15 +344,9 @@ class SettingsTool(Tool):
         # Lazy import to avoid circular dependency
         from modules.core_components.tools import save_config
 
-        # Save low CPU memory setting
-        components['settings_low_cpu_mem'].change(
-            lambda x: save_preference("low_cpu_mem_usage", x),
-            inputs=[components['settings_low_cpu_mem']],
-            outputs=[]
-        )
-        components['settings_attention_mechanism'].change(
-            lambda x: save_preference("attention_mechanism", x),
-            inputs=[components['settings_attention_mechanism']],
+        components['settings_dramabox_cpu_offload'].change(
+            lambda x: save_preference("dramabox_cpu_offload", x),
+            inputs=[components['settings_dramabox_cpu_offload']],
             outputs=[]
         )
 
@@ -541,58 +450,13 @@ class SettingsTool(Tool):
             save_preference("enabled_tools", _user_config["enabled_tools"])
             return "Restart the app to apply changes."
 
-        # Engine toggle handlers
-        TTS_ENGINES = shared_state.get('TTS_ENGINES', {})
-
-        def toggle_engine(engine_key, enabled):
-            """Save engine visibility to config."""
-            if "enabled_engines" not in _user_config:
-                _user_config["enabled_engines"] = {}
-            _user_config["enabled_engines"][engine_key] = enabled
-            save_preference("enabled_engines", _user_config["enabled_engines"])
-            return "Restart the app to apply changes."
-
         for key, label in TOGGLEABLE_TOOLS:
             comp = components[f'tool_toggle_{key}']
-            # Use default arg to capture key in closure
             comp.change(
                 lambda enabled, k=key: toggle_tool(k, enabled),
                 inputs=[comp],
                 outputs=[components['settings_status']]
             )
-
-        for engine_key in TTS_ENGINES:
-            comp = components[f'engine_toggle_{engine_key}']
-            comp.change(
-                lambda enabled, k=engine_key: toggle_engine(k, enabled),
-                inputs=[comp],
-                outputs=[components['settings_status']]
-            )
-
-        # ASR engine toggle handlers
-        ASR_ENGINES = shared_state.get('ASR_ENGINES', {})
-
-        def toggle_asr_engine(engine_key, enabled):
-            """Save ASR engine visibility to config."""
-            if "enabled_asr_engines" not in _user_config:
-                _user_config["enabled_asr_engines"] = {}
-            _user_config["enabled_asr_engines"][engine_key] = enabled
-            save_preference("enabled_asr_engines", _user_config["enabled_asr_engines"])
-            return "Restart the app to apply changes."
-
-        for engine_key in ASR_ENGINES:
-            comp = components[f'asr_toggle_{engine_key}']
-            comp.change(
-                lambda enabled, k=engine_key: toggle_asr_engine(k, enabled),
-                inputs=[comp],
-                outputs=[components['settings_status']]
-            )
-
-        components['bypass_split_limit'].change(
-            lambda x: save_preference("bypass_split_limit", x),
-            inputs=[components['bypass_split_limit']],
-            outputs=[]
-        )
 
         # Reset button handlers
         def reset_folder(folder_key):
@@ -755,9 +619,6 @@ class SettingsTool(Tool):
         def show_help(topic):
             help_map = {
                 "Voice Clone": show_voice_clone_help,
-                "Conversation": show_conversation_help,
-                "Voice Presets": show_voice_presets_help,
-                "Voice Design": show_voice_design_help,
                 "Prep Samples": show_prep_audio_help,
                 "Prep Dataset": show_dataset_help,
                 "Train Model": show_train_help,

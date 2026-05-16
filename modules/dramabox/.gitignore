@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.cache/
+models/*.safetensors
+*.log
+.DS_Store
+venv
+sample
+.history

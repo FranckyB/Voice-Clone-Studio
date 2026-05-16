@@ -6,7 +6,6 @@ import time
 from pathlib import Path
 
 import requests
-from modules.core_components.emotion_manager import CORE_EMOTIONS, EMOTIONS_FILE
 
 PROMPTS_FILE = Path(__file__).parent.parent.parent / "prompts.json"
 
@@ -16,7 +15,6 @@ PROMPTS_FILE = Path(__file__).parent.parent.parent / "prompts.json"
 PROMPT_CATEGORIES = {
     "prompt":       "Prompt",
     "conversation": "Conversation",
-    "voice_design":  "Voice Design",
     "sfx":          "SFX Design",
     "custom":       "Custom",
 }
@@ -24,9 +22,7 @@ PROMPT_CATEGORIES = {
 # Maps each tool's component prefix to the category it reads/writes.
 TOOL_CATEGORY_MAP = {
     "vc":   "prompt",
-    "vp":   "prompt",
     "conv": "conversation",
-    "vd":   "voice_design",
     "sfx":  "sfx",
 }
 
@@ -34,12 +30,8 @@ TOOL_CATEGORY_MAP = {
 # '_custom' is a local sentinel used by the Prompt Manager for the Custom entry.
 TARGET_CATEGORY_MAP = {
     "voice_clone.text":        "prompt",
-    "voice_presets.text":      "prompt",
-    "voice_design.reference":  "prompt",
-    "voice_design.instructions": "voice_design",
     "conversation.script":     "conversation",
-    "sound_effects.prompt":    "sfx",
-    "sound_effects.negative":  "sfx",
+    "sfx.prompt":              "sfx",
     "_custom":                 "custom",
 }
 
@@ -58,78 +50,34 @@ DEFAULT_OLLAMA_ENDPOINT = "http://127.0.0.1:11434/v1"
 
 # These are the default system prompts for each preset option. They can be overridden by system_prompts.json
 SYSTEM_PROMPTS = {
-    "TTS / Voice": (
-        "You are a script writer for voice acting. The user will give you a short idea or concept. "
-        "Your job is to write dialogue or monologue in FIRST PERSON, as if the speaker is saying it aloud. "
-        "Never describe the speaker in third person. Write the actual words they would speak. "
-        "Focus on tone, emotion, pacing, and natural speech patterns. "
-        "Output ONLY the spoken text, nothing else - no stage directions, no quotation marks."
-    ),
-    "TTS / Voice (Fish Speech)": (
-        "You are a script writer for voice acting using the Fish Speech S2 Pro TTS engine. "
-        "The user will give you a short idea or concept. "
-        "Your job is to write dialogue or monologue in FIRST PERSON, as if the speaker is saying it aloud. "
-        "Never describe the speaker in third person. Write the actual words they would speak.\n\n"
-        "IMPORTANT: Fish Speech S2 Pro supports inline expression tags using [tag] syntax. "
-        "You can embed these tags directly within the text at the word level to control how the speech is delivered. "
-        "Tags are NOT limited to a predefined set — you can also use free-form natural-language descriptions "
-        "such as [whisper in small voice], [professional broadcast tone], or [pitch up].\n\n"
-        "Use tags naturally and sparingly where they add value. Place them right before the word or phrase they should affect. "
-        "You may combine multiple tags. Do not overuse them — a few well-placed tags are more effective than tagging every sentence.\n\n"
-        "Common tags (15,000+ unique tags supported):\n"
-        "Laughter/Joy: [laughing], [chuckle], [chuckling], [laughing tone], [giggle], [audience laughter], [delight]\n"
-        "Breathing: [inhale], [exhale], [panting], [sigh], [clearing throat], [short pause], [pause]\n"
-        "Volume: [whisper], [low volume], [low voice], [volume down], [volume up], [loud], [screaming], [shouting]\n"
-        "Emotion: [excited], [excited tone], [angry], [sad], [surprised], [shocked], [moaning], [emphasis]\n"
-        "Style: [singing], [tsk], [with strong accent], [echo], [interrupting]\n\n"
-        "Example output:\n"
-        "[inhale] I can't believe it actually worked! [laughing] We did it! [excited] This is the best day "
-        "of my entire life. [pause] [whisper] I just... I never thought we'd get here.\n\n"
-        "Output ONLY the spoken text with tags, nothing else - no stage directions, no quotation marks."
+    "Voice Clone": (
+        "You are a voice performance writer for DramaBox text-to-audio synthesis. "
+        "Given a concept, character, or scene, write a compact audio prompt that describes: "
+        "the speaker's voice (age, timbre, pitch, tone, accent, character archetype), "
+        "the acoustic environment or scene if relevant, "
+        "and the emotional delivery arc from start to finish. "
+        "Place all spoken words inside double quotes exactly as they should be heard — "
+        "performance direction goes around the quotes, never inside them. "
+        "Use natural time-ordered language (then, a beat, as) to sequence emotional shifts. "
+        "Aim for 3 to 6 sentences. End at the final closing quote — no trailing description after it. "
+        "Output one compact paragraph with no headers, labels, or markdown."
     ),
     "Conversation": (
-        "You are a script writer for multi-speaker conversations. The user will give you a topic, scenario, "
-        "or concept along with the number of speakers to use. "
-        "Your job is to write a natural conversation where each speaker talks in FIRST PERSON to the others. "
-        "Each speaker line MUST start on a new line and use this exact structure: [n]: (emotion) text. "
-        "The emotional hint is REQUIRED on every line and must be chosen from these available emotions: {available_emotions}. "
-        "Pick the most appropriate emotion for each line based on that line's intent. "
-        "Output ONLY the conversation lines in the exact [n]: (emotion) text structure."
+        "You are a voice performance writer for DramaBox text-to-audio synthesis. "
+        "Given a topic, scenario, or conflict, write a multi-speaker exchange where each line is a self-contained DramaBox audio prompt. "
+        "Each line must appear on its own line in this exact format: [n]: <audio prompt> — where n is the speaker number. "
+        "Each audio prompt describes the speaker's voice (age, timbre, tone, accent), their emotional state and delivery, "
+        "then places the spoken words inside double quotes. Performance direction goes around the quotes, never inside them. "
+        "Give each speaker a distinct voice character that stays consistent across their lines. "
+        "Vary emotional energy and pacing between speakers — not every line is the same intensity. "
+        "End each line at its final closing quote — no trailing description after the spoken words. "
+        "Example format:\n"
+        "[1]: A woman in her early 30s, sharp and direct, barely looking up from her screen: \"Did you hear about the new project?\"\n"
+        "[2]: A man in his mid 40s, measured and calm, sets down his coffee: \"Just got the email this morning.\"\n"
+        "[1]: Her tone shifts — genuinely curious now, leaning forward slightly: \"What do you think about the timeline?\"\n"
+        "Output only the lines in [n]: format — no narration, no headers, no extra formatting."
     ),
-    "Voice Design (Simple)": (
-        "You are a voice styling assistant for text-to-speech generation. "
-        "Convert user intent into concise style instructions focused on delivery only: tone, pacing, energy, "
-        "emotion, clarity, accent, and intensity. "
-        "Do not write dialogue or script content. Do not explain. "
-        "Output only the final style instruction text."
-    ),
-    "Voice Design (Json)": (
-        "You are a voice design assistant for text-to-speech voice creation. "
-        "Convert user intent into a structured voice design instruction. "
-        "Do not write dialogue or script content. Do not explain. "
-        "Output only one object using this exact key structure and key order:\n"
-        "{\n"
-        "  'label': '',\n"
-        "  'role_type': '<e.g., Narrator, Podcast Host, Customer Agent, Actor, News Anchor, Teacher>',\n"
-        "  'attributes': {\n"
-        "    'age_range': '<e.g., young adult, middle-aged, elderly>',\n"
-        "    'gender_presentation': '<male|female|nonbinary|androgynous|unspecified>',\n"
-        "    'timbre': '',\n"
-        "    'pitch': '<low|mid|high and numeric approximate in Hz if known, optional>',\n"
-        "    'pitch_range': '<narrow|medium|wide>',\n"
-        "    'speaking_rate': '<slow|medium|fast and approximate words/min if known, optional>',\n"
-        "    'breathiness': '<none|light|moderate|heavy>',\n"
-        "    'nasality': '<none|low|moderate|high>',\n"
-        "    'articulation': '<clear|soft-mumbled|crisp|rounded>',\n"
-        "    'warmth': '<cool|neutral|warm|very warm>',\n"
-        "    'emotional_baseline': '<neutral|warm|authoritative|wry|cheerful|calm|serious|friendly etc.>',\n"
-        "    'accent_locale': '<e.g., General American, RP British, Southern US, Australian, neutral European Spanish>',\n"
-        "    'prosody_notes': '<short notes about intonation, stress, pausing>',\n"
-        "    'phonetic_cues': ['<1-3 specific phonetic cues, e.g., elongated vowels, crisp plosives, soft sibilants>'],\n"
-        "  }\n"
-        "}"
-    ),
-    "Sound Design / SFX": (
+    "SFX": (
         "You are a sound design prompt writer. The user will give you a short idea or concept. "
         "Your job is to expand it into a detailed, evocative description of a sound or soundscape. "
         "Focus on texture, layers, timing, spatial qualities, and acoustic characteristics. "
@@ -149,47 +97,10 @@ PROMPT_TARGETS = {
         "tool": "Voice Clone",
         "tab_id": "tab_voice_clone",
         "component_key": "text_input",
-        "default_system_preset": "TTS / Voice",
+        "default_system_preset": "Voice Clone",
         "template": (
             "Write final spoken text for voice generation. "
             "Return only the exact text to speak, no extra labels or notes.\n\n"
-            "User instruction:\n{instruction}"
-        ),
-    },
-    "voice_presets.text": {
-        "label": "Voice Preset: Prompt",
-        "tool": "Voice Presets",
-        "tab_id": "tab_voice_presets",
-        "component_key": "custom_text_input",
-        "default_system_preset": "TTS / Voice",
-        "template": (
-            "Write final spoken text for voice generation. "
-            "Return only the exact text to speak, no extra labels or notes.\n\n"
-            "User instruction:\n{instruction}"
-        ),
-    },
-    "voice_design.reference": {
-        "label": "Voice Design: Prompt",
-        "tool": "Voice Design",
-        "tab_id": "tab_voice_design",
-        "component_key": "design_text_input",
-        "default_system_preset": "TTS / Voice",
-        "template": (
-            "Write final spoken reference text for a voice design sample. "
-            "Return only the text to be spoken.\n\n"
-            "User instruction:\n{instruction}"
-        ),
-    },
-    "voice_design.instructions": {
-        "label": "Voice Design: Description",
-        "tool": "Voice Design",
-        "tab_id": "tab_voice_design",
-        "component_key": "design_instruct_input",
-        "default_system_preset": "Voice Design",
-        "template": (
-            "Write voice design instructions as one structured object. "
-            "Fill all fields with specific values when possible. "
-            "Return only the object, no markdown.\n\n"
             "User instruction:\n{instruction}"
         ),
     },
@@ -205,27 +116,15 @@ PROMPT_TARGETS = {
             "User instruction:\n{instruction}"
         ),
     },
-    "sound_effects.prompt": {
+    "sfx.prompt": {
         "label": "Sound FX: Prompt",
         "tool": "Sound Effects",
         "tab_id": "tab_sound_effects",
         "component_key": "sfx_prompt",
-        "default_system_preset": "Sound Design / SFX",
+        "default_system_preset": "SFX",
         "template": (
             "Write one high-quality sound design prompt for audio generation. "
             "Return only the final prompt text.\n\n"
-            "User instruction:\n{instruction}"
-        ),
-    },
-    "sound_effects.negative": {
-        "label": "Sound FX: Negative",
-        "tool": "Sound Effects",
-        "tab_id": "tab_sound_effects",
-        "component_key": "sfx_negative_prompt",
-        "default_system_preset": "Sound Design / SFX",
-        "template": (
-            "Write a negative prompt as a comma-separated list of sounds to avoid. "
-            "Return only the list, no explanation.\n\n"
             "User instruction:\n{instruction}"
         ),
     },
@@ -714,58 +613,10 @@ def discover_available_models(user_config, use_local_ollama, endpoint_url):
         return [], f"Failed to query models: {e}"
 
 
-# ============================================================================
-# Emotion helpers (for conversation system prompt placeholder)
-# ============================================================================
-
-def _extract_emotion_names(emotions):
-    """Extract sorted unique emotion names from an emotions dict."""
-    if not isinstance(emotions, dict):
-        return []
-    names = []
-    for key in emotions.keys():
-        name = str(key).strip()
-        if name:
-            names.append(name)
-    return sorted(set(names), key=lambda x: x.lower())
-
-
-def _load_emotions_from_file():
-    """Read emotions.json if present and valid."""
-    if not EMOTIONS_FILE.exists():
-        return {}
-    try:
-        with open(EMOTIONS_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if isinstance(data, dict):
-            return data
-    except (json.JSONDecodeError, OSError):
-        pass
-    return {}
-
-
-def get_available_emotions_text(user_config):
-    """Return comma-separated string of available emotion names."""
-    names = _extract_emotion_names(user_config.get("emotions"))
-    if not names:
-        names = _extract_emotion_names(_load_emotions_from_file())
-    if not names:
-        names = _extract_emotion_names(CORE_EMOTIONS)
-    return ", ".join(names)
-
-
 def resolve_system_prompt(preset_name, user_config, custom_text=None):
     """Resolve final system prompt text, substituting dynamic placeholders.
-
-    Supports:
-        {available_emotions} - filled with current emotion list
     """
     if preset_name == "Custom":
         return custom_text or ""
 
-    text = SYSTEM_PROMPTS.get(preset_name, "")
-
-    if "{available_emotions}" in text:
-        text = text.replace("{available_emotions}", get_available_emotions_text(user_config))
-
-    return text
+    return SYSTEM_PROMPTS.get(preset_name, "")

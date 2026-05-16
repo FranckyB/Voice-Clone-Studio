@@ -11,15 +11,6 @@ from .ui_components import (
     show_input_modal_js
 )
 
-from .emotion_manager import (
-    CORE_EMOTIONS,
-    load_emotions_from_config,
-    get_emotion_choices,
-    calculate_emotion_values,
-    handle_save_emotion,
-    handle_delete_emotion
-)
-
 from .constants import (
     MODEL_SIZES,
     MODEL_SIZES_BASE,
@@ -48,13 +39,6 @@ __all__ = [
     "INPUT_MODAL_HEAD",
     "INPUT_MODAL_HTML",
     "show_input_modal_js",
-    # Emotion manager
-    "CORE_EMOTIONS",
-    "load_emotions_from_config",
-    "get_emotion_choices",
-    "calculate_emotion_values",
-    "handle_save_emotion",
-    "handle_delete_emotion",
     # Constants
     "MODEL_SIZES",
     "MODEL_SIZES_BASE",

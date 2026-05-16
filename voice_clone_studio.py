@@ -89,28 +89,6 @@ auto_patch_inductor()
 # TRITON & INDUCTOR CONFIGURATION (Windows)
 # ============================================================================
 
-# Set Triton cache directory to models/.cache
-# This speeds up startup once kernels are compiled
-_models_dir = Path(__file__).parent / "models"
-abs_cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", ".cache")
-os.makedirs(abs_cache_dir, exist_ok=True)
-
-# Check persistent cache status once at startup, store result for later use
-cache_kernel_count = 0
-try:
-    cache_kernel_count = sum(1 for _, _, files in os.walk(abs_cache_dir) for f in files if f.endswith('.py'))
-except:
-    pass
-
-os.environ["FISH_SPEECH_CACHE_READY"] = "1" if cache_kernel_count >= 50 else "0"
-
-if cache_kernel_count >= 50:
-    print(f"[FISH SPEECH] Persistent cache found at models/.cache ({cache_kernel_count} compiled kernels).")
-
-os.environ["TRITON_CACHE_DIR"] = abs_cache_dir
-os.environ["TORCHINDUCTOR_CACHE_DIR"] = abs_cache_dir
-os.environ["TORCHINDUCTOR_FX_GRAPH_CACHE"] = "1"
-
 # Configure Torch Inductor for Windows performance and persistence
 try:
     import torch._inductor.config as inductor_config
@@ -139,21 +117,14 @@ from modules.core_components import (
     INPUT_MODAL_CSS,
     INPUT_MODAL_HEAD,
     INPUT_MODAL_HTML,
-    CORE_EMOTIONS,
     show_confirmation_modal_js,
-    show_input_modal_js,
-    load_emotions_from_config,
-    get_emotion_choices,
-    calculate_emotion_values,
-    handle_save_emotion,
-    handle_delete_emotion
+    show_input_modal_js
 )
 
 # UI components
 from modules.core_components.ui_components import (
     create_qwen_advanced_params,
     create_vibevoice_advanced_params,
-    create_emotion_intensity_slider,
     create_pause_controls
 )
 
@@ -180,7 +151,6 @@ from modules.core_components.tools import (
 
 # Add modules to path
 sys.path.insert(0, str(Path(__file__).parent / "modules"))
-sys.path.insert(0, str(Path(__file__).parent / "modules" / "fish_speech"))
 
 # ============================================================================
 # CONFIG & SETUP
@@ -189,23 +159,13 @@ sys.path.insert(0, str(Path(__file__).parent / "modules" / "fish_speech"))
 # Load config (CONFIG_FILE imported from tools)
 _user_config = load_config()
 
-# Check which engines are available before building UI
-if _user_config.get("skip_engine_check", False):
-    print("\nSkipping engine availability check (skip_engine_check enabled)\n")
-else:
+# Check which ASR engines are available
+if not _user_config.get("skip_engine_check", False):
     from modules.core_components.constants import check_engine_availability
-    print()
-    print("=" * 50)
-    print("Checking available engines...")
-    print("=" * 50)
     check_engine_availability(
         _user_config,
         save_config_fn=lambda key, value: save_config(_user_config, key, value)
     )
-    print("=" * 50)
-    print()
-
-_active_emotions = load_emotions_from_config(_user_config)
 
 # On macOS (MPS), training requires CUDA — auto-disable Train Model tab
 import platform
@@ -300,8 +260,8 @@ def create_ui():
         with gr.Row():
             with gr.Column(scale=20):
                 gr.Markdown("""
-                    # 🎙️ Voice Clone Studio
-                    <p style="font-size: 0.9em; color: var(--body-text-color-subdued); margin-top: -10px;">Powered by Qwen3-TTS, VibeVoice, LuxTTS, Chatterbox and Whisper</p>
+                    # 🎙️ Voice Clone Studio - DramaBox Edition
+                    <p style="font-size: 0.9em; color: var(--body-text-color-subdued); margin-top: -10px;">Powered by DramaBox, MMAudio, Qwen3-ASR and Whisper</p>
                     """)
 
             with gr.Column(scale=1, min_width=180):
@@ -313,7 +273,6 @@ def create_ui():
         # ============================================================
         shared_state = build_shared_state(
             user_config=_user_config,
-            active_emotions=_active_emotions,
             directories={
                 'OUTPUT_DIR': OUTPUT_DIR,
                 'SAMPLES_DIR': SAMPLES_DIR,
@@ -341,7 +300,7 @@ def create_ui():
             managers={
                 'tts_manager': _tts_manager,
                 'asr_manager': _asr_manager,
-                'foley_manager': _foley_manager
+                'foley_manager': _foley_manager,
             },
             confirm_trigger=confirm_trigger,
             input_trigger=input_trigger,

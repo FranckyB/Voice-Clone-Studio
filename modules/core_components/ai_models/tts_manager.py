@@ -4,14 +4,17 @@ TTS Model Manager
 Centralized management for all TTS models (Qwen3, VibeVoice, etc.)
 """
 
-import os
-import torch
+import gc
 import hashlib
+import importlib.util
+import inspect
 import logging
+import os
+import re
+import sys
+import torch
 from pathlib import Path
 from typing import Dict, Tuple, Optional
-
-import gc
 
 from .model_utils import (
     get_device, get_dtype, get_attention_implementation,
@@ -94,6 +97,15 @@ class TTSManager:
 
         # CUDA graphs acceleration state
         self._faster_qwen3_available = None  # lazy-checked
+
+        # DramaBox integration state
+        self._dramabox_root = None
+        self._dramabox_downloader_mod = None
+        self._dramabox_inference_mod = None
+        self._dramabox_supported_flags = None
+        # DramaBox warm-server cache (TTSServer instance, keyed by checkpoint paths)
+        self._dramabox_server = None
+        self._dramabox_server_key = None
 
     def _use_cuda_graphs(self):
         """Check if CUDA graphs acceleration should be used for Qwen3 models."""
@@ -768,6 +780,346 @@ class TTSManager:
 
         return audio_np, sr
 
+    # ============================================================
+    # DRAMABOX METHODS
+    # ============================================================
+
+    def _resolve_dramabox_root(self):
+        """Return the vendored DramaBox root, always from modules/dramabox/."""
+        project_root = Path(__file__).resolve().parents[3]
+        vendored = project_root / "modules" / "dramabox"
+        if vendored.exists():
+            return vendored
+        raise RuntimeError(
+            f"Vendored DramaBox not found at {vendored}. "
+            "Ensure modules/dramabox/ exists in the project."
+        )
+
+    def _ensure_dramabox_paths(self, dramabox_root):
+        """Add DramaBox subdirectories to sys.path if not already present."""
+        src_dir = dramabox_root / "src"
+        ltx_dir = dramabox_root / "ltx2"
+        for path in (str(dramabox_root), str(src_dir), str(ltx_dir)):
+            if path not in sys.path:
+                sys.path.insert(0, path)
+
+    def _load_module_from_path(self, module_name, module_path):
+        """Dynamically load a Python module from a file path."""
+        spec = importlib.util.spec_from_file_location(module_name, str(module_path))
+        if spec is None or spec.loader is None:
+            raise RuntimeError(f"Failed to load module: {module_path}")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def _ensure_dramabox_modules(self):
+        """Resolve and load DramaBox modules (model_downloader, inference)."""
+        dramabox_root = self._resolve_dramabox_root()
+
+        if self._dramabox_root != dramabox_root:
+            self._dramabox_root = dramabox_root
+            self._dramabox_downloader_mod = None
+            self._dramabox_inference_mod = None
+            self._dramabox_supported_flags = None
+
+        self._ensure_dramabox_paths(dramabox_root)
+
+        src_dir = dramabox_root / "src"
+        downloader_path = src_dir / "model_downloader.py"
+        inference_path = src_dir / "inference.py"
+
+        if not downloader_path.exists():
+            raise RuntimeError(f"DramaBox model_downloader not found: {downloader_path}")
+        if not inference_path.exists():
+            raise RuntimeError(f"DramaBox inference script not found: {inference_path}")
+
+        if self._dramabox_downloader_mod is None:
+            self._dramabox_downloader_mod = self._load_module_from_path("dramabox_model_downloader", downloader_path)
+        if self._dramabox_inference_mod is None:
+            self._dramabox_inference_mod = self._load_module_from_path("dramabox_inference", inference_path)
+
+        return dramabox_root
+
+    def _get_supported_dramabox_flags(self):
+        """Extract supported CLI flags from DramaBox src/inference.py."""
+        if self._dramabox_supported_flags is not None:
+            return self._dramabox_supported_flags
+
+        flags = set()
+        if self._dramabox_root is None:
+            self._dramabox_supported_flags = flags
+            return flags
+
+        inference_path = self._dramabox_root / "src" / "inference.py"
+        try:
+            text = inference_path.read_text(encoding="utf-8")
+            flags.update(re.findall(r'add_argument\(\s*"(--[a-z0-9-]+)"', text))
+        except OSError:
+            pass
+
+        self._dramabox_supported_flags = flags
+        return flags
+
+    def _detect_lora_rank(self, lora_path):
+        """Best-effort LoRA rank detection from a safetensors adapter file."""
+        if not lora_path:
+            return None
+
+        try:
+            from safetensors import safe_open
+        except Exception:
+            return None
+
+        try:
+            with safe_open(str(lora_path), framework="pt") as f:
+                keys = list(f.keys())
+
+                # Prefer A matrix rank: [r, in]
+                for key in keys:
+                    if key.endswith(".lora_A.weight"):
+                        tensor = f.get_tensor(key)
+                        if tensor.ndim >= 2 and tensor.shape[0] > 0:
+                            return int(tensor.shape[0])
+
+                # Fallback to B matrix rank: [out, r]
+                for key in keys:
+                    if key.endswith(".lora_B.weight"):
+                        tensor = f.get_tensor(key)
+                        if tensor.ndim >= 2 and tensor.shape[1] > 0:
+                            return int(tensor.shape[1])
+        except Exception:
+            return None
+
+        return None
+
+    def generate_dramabox_to_file(self, prompt, output_path, voice_sample=None, seed=42, lora_path=None, cpu_offload=False, dramabox_params=None):
+        """Generate audio using DramaBox TTS and write to output_path.
+
+        When cpu_offload=False (default) a TTSServer instance is created once
+        and kept warm, eliminating the ~19 s model-reload overhead — fast like
+        the reference app.py.
+
+        When cpu_offload=True the legacy argv path is used (lower peak VRAM but
+        slow, reloads models on every call) and any existing warm server is torn
+        down to free VRAM.
+        """
+        self._check_and_unload_if_different("dramabox_tts")
+
+        if not prompt or not str(prompt).strip():
+            raise RuntimeError("Prompt is empty.")
+
+        dramabox_root = self._ensure_dramabox_modules()
+        params = dramabox_params or {}
+
+        # ------------------------------------------------------------------
+        # Warm-server path (cpu_offload=False)
+        # ------------------------------------------------------------------
+        if not cpu_offload:
+            # If server is already warm, skip get_all_paths() entirely — it hits
+            # HuggingFace every call even when files are cached, printing noisy
+            # progress output. The paths are already baked into _dramabox_server_key.
+            if self._dramabox_server is not None:
+                paths = None  # not needed — server is already loaded
+            else:
+                paths = self._dramabox_downloader_mod.get_all_paths()
+
+            server_key = (
+                str(paths["transformer"]),
+                str(paths["audio_components"]),
+                str(paths["gemma_root"]),
+            ) if paths else self._dramabox_server_key
+
+            if self._dramabox_server is not None and self._dramabox_server_key != server_key:
+                logging.info("DramaBox: checkpoint changed — unloading old warm server")
+                del self._dramabox_server
+                self._dramabox_server = None
+                self._dramabox_server_key = None
+                empty_device_cache()
+
+            if self._dramabox_server is None:
+                logging.info("DramaBox: creating warm TTSServer (models load once)...")
+                from inference_server import TTSServer
+                self._dramabox_server = TTSServer(
+                    checkpoint=str(paths["transformer"]),
+                    full_checkpoint=str(paths["audio_components"]),
+                    gemma_root=str(paths["gemma_root"]),
+                    device="cuda",
+                    dtype="bf16",
+                    compile_model=False,  # torch.compile fails on Windows (missing omp.h)
+                    bnb_4bit=True,
+                )
+                self._dramabox_server_key = server_key
+
+            # Resolve LoRA rank
+            lora_rank = params.get("lora_rank")
+            if lora_rank is None and lora_path:
+                lora_rank = self._detect_lora_rank(lora_path) or 128
+
+            # Map rescale_scale: slider value -1 means "auto"
+            raw_rescale = params.get("rescale_scale")
+            if raw_rescale is not None and float(raw_rescale) < 0:
+                rescale_val = "auto"
+            elif raw_rescale is not None:
+                rescale_val = float(raw_rescale)
+            else:
+                rescale_val = "auto"
+
+            # steps=0 means "use default"
+            raw_steps = params.get("steps")
+            steps_val = int(raw_steps) if raw_steps and int(raw_steps) > 0 else 30
+
+            self._dramabox_server.generate_to_file(
+                prompt=str(prompt).strip(),
+                output=str(output_path),
+                voice_ref=str(voice_sample) if voice_sample else None,
+                seed=int(seed),
+                lora_path=str(lora_path) if lora_path else None,
+                lora_rank=int(lora_rank) if lora_rank else 128,
+                watermark=not bool(params.get("no_watermark", False)),
+                cfg_scale=float(params["cfg_scale"]) if params.get("cfg_scale") is not None else 2.5,
+                stg_scale=float(params["stg_scale"]) if params.get("stg_scale") is not None else 1.5,
+                rescale_scale=rescale_val,
+                duration_multiplier=float(params["duration_multiplier"]) if params.get("duration_multiplier") is not None else 1.1,
+                gen_duration=float(params["gen_duration"]) if params.get("gen_duration") is not None else 0.0,
+                ref_duration=float(params["ref_duration"]) if params.get("ref_duration") is not None else 10.0,
+                steps=steps_val,
+                sampler=params.get("sampler") or "euler",
+                negative_prompt=params.get("negative_prompt") or None,
+                speed=float(params["speed"]) if params.get("speed") is not None else 1.0,
+                stg_block=int(params["stg_block"]) if params.get("stg_block") is not None else 29,
+            )
+
+            out_file = Path(output_path)
+            if not out_file.exists():
+                raise RuntimeError("DramaBox did not produce an output audio file.")
+            return str(out_file)
+
+        # ------------------------------------------------------------------
+        # CPU-offload / legacy argv path (cpu_offload=True)
+        # ------------------------------------------------------------------
+
+        # Unload the warm server if the user switched back to cpu_offload mode
+        if self._dramabox_server is not None:
+            logging.info("DramaBox: switching to cpu-offload mode — unloading warm server")
+            del self._dramabox_server
+            self._dramabox_server = None
+            self._dramabox_server_key = None
+            empty_device_cache()
+
+        paths = self._dramabox_downloader_mod.get_all_paths()
+        argv = [
+            "--prompt", str(prompt).strip(),
+            "--output", str(output_path),
+            "--seed", str(int(seed)),
+            "--checkpoint", str(paths["transformer"]),
+            "--full-checkpoint", str(paths["audio_components"]),
+            "--gemma-root", str(paths["gemma_root"]),
+        ]
+
+        if voice_sample:
+            argv.extend(["--voice-sample", str(voice_sample)])
+        else:
+            argv.append("--no-ref")
+
+        supported_flags = self._get_supported_dramabox_flags()
+
+        if "--cpu-offload" in supported_flags:
+            argv.append("--cpu-offload")
+
+        if lora_path:
+            argv.extend(["--lora", str(lora_path)])
+
+        if params.get("ref_duration") is not None:
+            argv.extend(["--ref-duration", str(float(params.get("ref_duration")))])
+        if params.get("gen_duration") is not None:
+            argv.extend(["--gen-duration", str(float(params.get("gen_duration")))])
+        if params.get("pad_start") is not None:
+            argv.extend(["--pad-start", str(float(params.get("pad_start")))])
+        if params.get("speed") is not None:
+            argv.extend(["--speed", str(float(params.get("speed")))])
+        if params.get("duration_multiplier") is not None:
+            argv.extend(["--duration-multiplier", str(float(params.get("duration_multiplier")))])
+
+        if params.get("sampler") in {"euler", "heun"}:
+            argv.extend(["--sampler", params.get("sampler")])
+
+        if params.get("cfg_scale") is not None:
+            argv.extend(["--cfg-scale", str(float(params.get("cfg_scale")))])
+        if params.get("stg_scale") is not None:
+            argv.extend(["--stg-scale", str(float(params.get("stg_scale")))])
+        if params.get("stg_block") is not None:
+            argv.extend(["--stg-block", str(int(params.get("stg_block")))])
+        if params.get("rescale_scale") is not None:
+            argv.extend(["--rescale-scale", str(float(params.get("rescale_scale")))])
+        if params.get("modality_scale") is not None:
+            argv.extend(["--modality-scale", str(float(params.get("modality_scale")))])
+        if params.get("cfg_clamp") is not None:
+            argv.extend(["--cfg-clamp", str(float(params.get("cfg_clamp")))])
+        if params.get("steps") is not None:
+            argv.extend(["--steps", str(int(params.get("steps")))])
+        if params.get("fps") is not None:
+            argv.extend(["--fps", str(float(params.get("fps")))])
+        if params.get("negative_prompt"):
+            argv.extend(["--negative-prompt", str(params.get("negative_prompt"))])
+
+        lora_rank = params.get("lora_rank")
+        if lora_rank is None and lora_path:
+            lora_rank = self._detect_lora_rank(lora_path)
+
+        if lora_rank is not None and "--lora-rank" in supported_flags:
+            argv.extend(["--lora-rank", str(int(lora_rank))])
+        if params.get("id_guidance_scale") is not None:
+            argv.extend(["--id-guidance-scale", str(float(params.get("id_guidance_scale")))])
+
+        if params.get("no_watermark"):
+            argv.append("--no-watermark")
+
+        if params.get("bnb_4bit") is False:
+            argv.append("--no-bnb-4bit")
+
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(str(dramabox_root))
+            self._invoke_dramabox_inference(argv)
+        finally:
+            os.chdir(old_cwd)
+
+        out_file = Path(output_path)
+        if not out_file.exists():
+            raise RuntimeError("DramaBox did not produce an output audio file.")
+
+        return str(out_file)
+
+    def _invoke_dramabox_inference(self, argv):
+        """Run DramaBox inference across both legacy and modern entry-point signatures."""
+        mod = self._dramabox_inference_mod
+        if mod is None:
+            raise RuntimeError("DramaBox inference module is not loaded.")
+
+        if hasattr(mod, "main"):
+            main_fn = mod.main
+            try:
+                sig = inspect.signature(main_fn)
+                accepts_args = len(sig.parameters) > 0
+            except Exception:
+                accepts_args = True
+
+            if accepts_args:
+                return main_fn(argv)
+
+            old_argv = sys.argv[:]
+            try:
+                sys.argv = ["inference.py"] + list(argv)
+                return main_fn()
+            finally:
+                sys.argv = old_argv
+
+        if hasattr(mod, "parse_args") and hasattr(mod, "run_inference"):
+            parsed = mod.parse_args(argv)
+            return mod.run_inference(parsed)
+
+        raise RuntimeError("DramaBox inference module has no supported entry point.")
+
     def unload_all(self):
         """Unload all TTS models to free VRAM."""
         freed = []
@@ -851,6 +1203,20 @@ class TTSManager:
             self._trained_vv_lora_pred_head = None
             self._trained_vv_pred_head_is_peft = False
             freed.append("VibeVoice Trained")
+
+        if self._dramabox_downloader_mod is not None or self._dramabox_inference_mod is not None:
+            self._dramabox_downloader_mod = None
+            self._dramabox_inference_mod = None
+            self._dramabox_root = None
+            self._dramabox_supported_flags = None
+            freed.append("DramaBox")
+
+        if self._dramabox_server is not None:
+            del self._dramabox_server
+            self._dramabox_server = None
+            self._dramabox_server_key = None
+            if "DramaBox" not in freed:
+                freed.append("DramaBox (warm server)")
 
         if freed:
             gc.collect()
@@ -2523,7 +2889,9 @@ class TTSManager:
         Returns:
             Tuple of (engine, model_size) e.g. ('qwen', '0.6B')
         """
-        if "Fish Speech" in model_selection:
+        if "DramaBox" in model_selection:
+            return "dramabox", "Default"
+        elif "Fish Speech" in model_selection:
             return "fish_speech", "Pro"
         elif "LuxTTS" in model_selection:
             return "luxtts", "Default"
